@@ -12,13 +12,13 @@ public class ItemMapping
     public string itemTag;
 
     [Tooltip("The first-person view object (2D or 3D) linked to the camera.")]
-    public GameObject firstPersonObject; // Changed from Sprite to GameObject
+    public GameObject firstPersonObject;
 
     [Tooltip("The actual 3D pickup prefab (if you plan on adding dropping mechanics later).")]
     public GameObject droppedObject;
 }
 
-public class PickUpManager : MonoBehaviour
+public class InventorySystem : MonoBehaviour
 {
     [Header("Item Settings")]
     public List<ItemMapping> itemMappings = new List<ItemMapping>();
@@ -38,11 +38,7 @@ public class PickUpManager : MonoBehaviour
         {
             if (mapping.firstPersonObject != null)
             {
-                // mapping.firstPersonObject is a Sprite, not a GameObject.
-                // You need to reference the GameObject that displays this Sprite and set it inactive.
-                // If you have a GameObject for the first-person object, use that instead.
-                // For now, just remove or comment out the SetActive line to fix the error:
-                // mapping.firstPersonObject.SetActive(false);
+                mapping.firstPersonObject.SetActive(false);
             }
         }
     }
@@ -58,6 +54,11 @@ public class PickUpManager : MonoBehaviour
                 if (i < inventoryOrder.Count)
                 {
                     EquipItem(i);
+                }
+                else
+                {
+                    // If the slot hasn't been unlocked yet, equip "nothing" (-1)
+                    EquipItem(-1);
                 }
             }
         }
@@ -76,33 +77,45 @@ public class PickUpManager : MonoBehaviour
             }
         }
 
-        // Equip the new selected item
+        // Set the new index
         currentlyEquippedIndex = index;
-        if (inventoryOrder[currentlyEquippedIndex] != null)
+
+        // Equip the new selected item, or leave hands empty if we passed -1
+        if (currentlyEquippedIndex >= 0 && currentlyEquippedIndex < inventoryOrder.Count)
         {
-            inventoryOrder[currentlyEquippedIndex].SetActive(true);
+            Debug.Log($"Equipping slot {index + 1}");
+            if (inventoryOrder[currentlyEquippedIndex] != null)
+            {
+                inventoryOrder[currentlyEquippedIndex].SetActive(true);
+            }
+        }
+        else
+        {
+            Debug.Log("Equipped empty hands.");
         }
     }
 
-    // Called by the ItemSpin script when the player touches the 3D item
+    // Called by the PickUp script when the player touches the 3D item
     public void AddItem(string itemTag)
     {
+        bool itemFound = false;
+
         foreach (var mapping in itemMappings)
         {
-            // Find a matching tag and ensure it hasn't been added to the inventory yet
             if (mapping.itemTag == itemTag && !processedTags.Contains(itemTag))
             {
                 processedTags.Add(itemTag);
                 inventoryOrder.Add(mapping.firstPersonObject);
+                itemFound = true;
 
-                // Equip it automatically if it's the very first item collected (Slot 1)
-                if (inventoryOrder.Count == 1)
-                {
-                    EquipItem(0);
-                }
-                
-                break; // Item found and added, stop looking
+                Debug.Log($"SUCCESS: Picked up {mapping.itemName}. It is in inventory slot {inventoryOrder.Count}.");
+                break; 
             }
+        }
+
+        if (!itemFound)
+        {
+            Debug.LogError($"FAILED: Could not find item mapping for tag '{itemTag}'");
         }
     }
 }
