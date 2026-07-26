@@ -12,26 +12,40 @@ public class PickUp : MonoBehaviour
 
     private void OnTriggerEnter(Collider other)
     {
-        // Check of het de speler is die het voorwerp aanraakt
-        if (other.CompareTag("Player"))
+        // Check of de speler het voorwerp aanraakt
+        if (!other.CompareTag("Player"))
+            return;
+
+        InventorySystem inventory = other.GetComponent<InventorySystem>();
+
+        if (inventory == null)
         {
-            InventorySystem inventory = other.GetComponent<InventorySystem>();
-
-            if (inventory != null)
-            {
-                Debug.Log($"Item '{itemTag}' opgepakt! Geluid wordt nu direct afgespeeld.");
-
-                // Speelt direct het geluid af op de 3D positie van dit voorwerp
-                SoundManager.Instance?.PlayAtPoint(pickupSound, transform.position, pickupVolume);
-
-                // Voeg toe aan inventory en verwijder uit de wereld
-                inventory.AddItem(itemTag);
-                Destroy(gameObject);
-            }
-            else
-            {
-                Debug.LogWarning("Player does not have an InventorySystem script attached!");
-            }
+            Debug.LogWarning("Player does not have an InventorySystem script attached!");
+            return;
         }
+
+        Debug.Log($"Item '{itemTag}' opgepakt!");
+
+        // Speel pickup geluid af
+        SoundManager.Instance?.PlayAtPoint(pickupSound, transform.position, pickupVolume);
+
+        // Voeg item toe aan inventory
+        inventory.AddItem(itemTag);
+
+        // Speel pickup animatie af
+        PlayerAnimations animationController =
+            other.GetComponentInChildren<PlayerAnimations>();
+
+        if (animationController != null)
+        {
+            animationController.PlayPickupAnimation();
+        }
+        else
+        {
+            Debug.LogWarning("No PlayerAnimations found on the player.");
+        }
+
+        // Verwijder het item uit de wereld
+        Destroy(gameObject);
     }
 }
