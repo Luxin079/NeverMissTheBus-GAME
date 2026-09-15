@@ -4,52 +4,44 @@ using UnityEngine.UI;
 using TMPro;
 using System.Collections;
 
-/// <summary>
-/// Complete runtime-built main menu for Never Miss The Bus.
-/// The background is generated at low resolution to keep the PS2/VHS look
-/// without requiring an extra binary art asset in the project.
-/// </summary>
 public class StartScreenUI : MonoBehaviour
 {
-    [Header("Scene")]
     [SerializeField] private string gameSceneName = "SampleScene";
-
-    [Header("Visuals")]
-    [SerializeField] private Color panelColor = new Color(0.015f, 0.018f, 0.017f, 0.82f);
     [SerializeField] private Color textColor = new Color(0.78f, 0.78f, 0.70f, 1f);
     [SerializeField] private Color selectedColor = new Color(0.95f, 0.78f, 0.42f, 1f);
 
     private CanvasGroup fadeGroup;
-    private TextMeshProUGUI title;
-    private TextMeshProUGUI subtitle;
-    private TextMeshProUGUI controlsText;
     private TextMeshProUGUI[] buttons;
+    private TextMeshProUGUI sensitivityValue;
+    private GameObject settingsPanel;
+    private Slider sensitivitySlider;
     private int selectedIndex;
-    private float flickerTimer;
-    private bool controlsOpen;
+    private bool settingsOpen;
+
+    private const float MinSensitivity = 0.1f;
+    private const float MaxSensitivity = 5f;
+    private const float DefaultSensitivity = 2f;
 
     private void Awake()
     {
         Cursor.visible = true;
         Cursor.lockState = CursorLockMode.None;
+        EnsureEventSystem();
         BuildMenu();
     }
 
     private void Update()
     {
-        if (buttons == null || buttons.Length == 0) return;
+        if (settingsOpen)
+        {
+            if (Input.GetKeyDown(KeyCode.Escape)) CloseSettings();
+            return;
+        }
 
+        if (buttons == null) return;
         if (Input.GetKeyDown(KeyCode.W) || Input.GetKeyDown(KeyCode.UpArrow)) ChangeSelection(-1);
         if (Input.GetKeyDown(KeyCode.S) || Input.GetKeyDown(KeyCode.DownArrow)) ChangeSelection(1);
         if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.Space)) ActivateSelection();
-        if (Input.GetKeyDown(KeyCode.Escape) && controlsOpen) CloseControls();
-
-        flickerTimer += Time.unscaledDeltaTime;
-        if (flickerTimer > 0.08f)
-        {
-            flickerTimer = 0f;
-            title.alpha = Random.Range(0.91f, 1.0f);
-        }
     }
 
     private void BuildMenu()
@@ -64,64 +56,61 @@ public class StartScreenUI : MonoBehaviour
         scaler.referenceResolution = new Vector2(1920, 1080);
         canvasObject.AddComponent<GraphicRaycaster>();
 
+        Texture2D art = Resources.Load<Texture2D>("MainMenuBackground");
         GameObject background = CreateUIObject("Background Art", canvas.transform);
-        Image backgroundImage = background.AddComponent<Image>();
-        backgroundImage.sprite = CreateBackgroundSprite();
-        backgroundImage.type = Image.Type.Simple;
-        backgroundImage.preserveAspect = false;
+        RawImage raw = background.AddComponent<RawImage>();
+        raw.texture = art;
+        raw.color = Color.white;
+        raw.raycastTarget = false;
+        AspectRatioFitter aspect = background.AddComponent<AspectRatioFitter>();
+        aspect.aspectMode = AspectRatioFitter.AspectMode.EnvelopeParent;
+        aspect.aspectRatio = 1.5f;
         Stretch(background.transform);
 
-        GameObject overlay = CreateUIObject("Dark Overlay", canvas.transform);
-        Image overlayImage = overlay.AddComponent<Image>();
-        overlayImage.color = new Color(0f, 0f, 0f, 0.34f);
-        Stretch(overlay.transform);
+        // Only covers the baked-in menu labels from the artwork. The title and scene remain untouched.
+        GameObject menuBackplate = CreateUIObject("Interactive Menu Backplate", canvas.transform);
+        Image backplateImage = menuBackplate.AddComponent<Image>();
+        backplateImage.color = new Color(0f, 0f, 0f, 0.72f);
+        SetAnchors(menuBackplate.GetComponent<RectTransform>(), new Vector2(0.065f, 0.27f), new Vector2(0.43f, 0.55f));
 
-        GameObject scanlines = CreateUIObject("VHS Scanlines", canvas.transform);
-        Image scanlineImage = scanlines.AddComponent<Image>();
-        scanlineImage.sprite = CreateScanlineSprite();
-        scanlineImage.color = new Color(1f, 1f, 1f, 0.08f);
-        scanlineImage.type = Image.Type.Tiled;
-        Stretch(scanlines.transform);
+        GameObject menu = CreateUIObject("Interactive Menu", canvas.transform);
+        SetAnchors(menu.GetComponent<RectTransform>(), new Vector2(0.075f, 0.25f), new Vector2(0.43f, 0.56f));
 
-        GameObject panel = CreateUIObject("Menu Panel", canvas.transform);
-        Image panelImage = panel.AddComponent<Image>();
-        panelImage.color = panelColor;
-        RectTransform panelRect = panel.GetComponent<RectTransform>();
-        panelRect.anchorMin = new Vector2(0.055f, 0.105f);
-        panelRect.anchorMax = new Vector2(0.445f, 0.895f);
-        panelRect.offsetMin = Vector2.zero;
-        panelRect.offsetMax = Vector2.zero;
-
-        title = CreateText("NEVER MISS\nTHE BUS", panel.transform, 72, FontStyles.Bold, TextAlignmentOptions.Center);
-        title.color = textColor;
-        SetAnchors(title.rectTransform, new Vector2(0.05f, 0.68f), new Vector2(0.95f, 0.94f));
-
-        subtitle = CreateText("THE LAST BUS IS WAITING.", panel.transform, 18, FontStyles.Normal, TextAlignmentOptions.Center);
-        subtitle.color = new Color(textColor.r, textColor.g, textColor.b, 0.65f);
-        SetAnchors(subtitle.rectTransform, new Vector2(0.08f, 0.60f), new Vector2(0.92f, 0.66f));
-
-        string[] labels = { "START GAME", "CONTROLS", "QUIT" };
+        string[] labels = { "START GAME", "SETTINGS", "QUIT" };
         buttons = new TextMeshProUGUI[labels.Length];
+
         for (int i = 0; i < labels.Length; i++)
         {
-            buttons[i] = CreateText(labels[i], panel.transform, 28, FontStyles.Normal, TextAlignmentOptions.Left);
-            float top = 0.48f - i * 0.105f;
-            SetAnchors(buttons[i].rectTransform, new Vector2(0.17f, top - 0.055f), new Vector2(0.83f, top + 0.055f));
-            buttons[i].raycastTarget = false;
-        }
+            int index = i;
+            GameObject buttonObject = CreateUIObject(labels[i], menu.transform);
+            RectTransform rect = buttonObject.GetComponent<RectTransform>();
+            float y = 0.78f - i * 0.31f;
+            SetAnchors(rect, new Vector2(0.10f, y - 0.13f), new Vector2(0.95f, y + 0.13f));
 
-        controlsText = CreateText("CONTROLS\n\nW A S D     MOVE\nSHIFT       RUN\nC           CROUCH\nSPACE       JUMP\nF           FLASHLIGHT\nMOUSE       LOOK\n\nESC         BACK", canvas.transform, 22, FontStyles.Normal, TextAlignmentOptions.Left);
-        controlsText.color = textColor;
-        SetAnchors(controlsText.rectTransform, new Vector2(0.58f, 0.25f), new Vector2(0.88f, 0.78f));
-        controlsText.gameObject.SetActive(false);
+            Button button = buttonObject.AddComponent<Button>();
+            Image hitImage = buttonObject.AddComponent<Image>();
+            hitImage.color = new Color(0f, 0f, 0f, 0f);
+            hitImage.raycastTarget = true;
+            button.targetGraphic = hitImage;
+            button.onClick.AddListener(() => { selectedIndex = index; ActivateSelection(); });
+
+            TextMeshProUGUI text = CreateText(labels[i], buttonObject.transform, 28, FontStyles.Normal, TextAlignmentOptions.Left);
+            text.raycastTarget = false;
+            Stretch(text.transform);
+            text.rectTransform.offsetMin = new Vector2(35f, 0f);
+            text.rectTransform.offsetMax = Vector2.zero;
+            buttons[i] = text;
+        }
 
         TextMeshProUGUI hint = CreateText("W / S  SELECT     ENTER  CONFIRM", canvas.transform, 15, FontStyles.Normal, TextAlignmentOptions.Center);
         hint.color = new Color(textColor.r, textColor.g, textColor.b, 0.48f);
-        SetAnchors(hint.rectTransform, new Vector2(0.055f, 0.045f), new Vector2(0.445f, 0.085f));
+        SetAnchors(hint.rectTransform, new Vector2(0.065f, 0.045f), new Vector2(0.43f, 0.085f));
 
         TextMeshProUGUI version = CreateText("NMTB // 01", canvas.transform, 13, FontStyles.Normal, TextAlignmentOptions.Right);
-        version.color = new Color(textColor.r, textColor.g, textColor.b, 0.32f);
+        version.color = new Color(textColor.r, textColor.g, textColor.b, 0.3f);
         SetAnchors(version.rectTransform, new Vector2(0.88f, 0.025f), new Vector2(0.975f, 0.055f));
+
+        BuildSettings(canvas.transform);
 
         fadeGroup = canvasObject.AddComponent<CanvasGroup>();
         fadeGroup.alpha = 0f;
@@ -129,123 +118,82 @@ public class StartScreenUI : MonoBehaviour
         UpdateSelection();
     }
 
-    private Sprite CreateBackgroundSprite()
+    private void BuildSettings(Transform canvas)
     {
-        const int width = 320;
-        const int height = 180;
-        Texture2D texture = new Texture2D(width, height, TextureFormat.RGBA32, false);
-        texture.filterMode = FilterMode.Point;
-        texture.wrapMode = TextureWrapMode.Clamp;
+        settingsPanel = CreateUIObject("Settings Panel", canvas);
+        Image panelImage = settingsPanel.AddComponent<Image>();
+        panelImage.color = new Color(0.015f, 0.018f, 0.017f, 0.96f);
+        SetAnchors(settingsPanel.GetComponent<RectTransform>(), new Vector2(0.27f, 0.20f), new Vector2(0.73f, 0.80f));
 
-        Color sky = new Color(0.025f, 0.034f, 0.035f);
-        Color ground = new Color(0.045f, 0.055f, 0.047f);
-        for (int y = 0; y < height; y++)
-        {
-            Color row = Color.Lerp(ground, sky, y / (float)height);
-            for (int x = 0; x < width; x++) texture.SetPixel(x, y, row);
-        }
+        TextMeshProUGUI title = CreateText("SETTINGS", settingsPanel.transform, 42, FontStyles.Bold, TextAlignmentOptions.Center);
+        title.color = textColor;
+        SetAnchors(title.rectTransform, new Vector2(0.10f, 0.72f), new Vector2(0.90f, 0.90f));
 
-        // Wet road.
-        for (int y = 0; y < 72; y++)
-        {
-            int left = 125 - y / 4;
-            int right = 250 + y / 3;
-            FillRect(texture, left, y, right - left, 1, new Color(0.055f, 0.058f, 0.052f));
-        }
+        TextMeshProUGUI label = CreateText("MOUSE SENSITIVITY", settingsPanel.transform, 22, FontStyles.Normal, TextAlignmentOptions.Left);
+        label.color = textColor;
+        SetAnchors(label.rectTransform, new Vector2(0.12f, 0.53f), new Vector2(0.55f, 0.64f));
 
-        // Forest silhouettes.
-        for (int i = 0; i < 18; i++)
-            DrawTree(texture, 8 + i * 17 + (i % 3) * 4, 52 + (i % 4) * 7, 35 + (i % 5) * 9);
+        sensitivityValue = CreateText("2.0", settingsPanel.transform, 22, FontStyles.Bold, TextAlignmentOptions.Right);
+        sensitivityValue.color = selectedColor;
+        SetAnchors(sensitivityValue.rectTransform, new Vector2(0.65f, 0.53f), new Vector2(0.88f, 0.64f));
 
-        // Bus stop sign.
-        FillRect(texture, 178, 54, 4, 62, new Color(0.08f, 0.08f, 0.07f));
-        FillRect(texture, 171, 107, 18, 23, new Color(0.07f, 0.075f, 0.07f));
-        FillRect(texture, 174, 110, 12, 17, new Color(0.13f, 0.13f, 0.11f));
-        FillRect(texture, 177, 115, 6, 5, new Color(0.25f, 0.24f, 0.18f));
+        GameObject sliderObject = CreateUIObject("Sensitivity Slider", settingsPanel.transform);
+        SetAnchors(sliderObject.GetComponent<RectTransform>(), new Vector2(0.12f, 0.39f), new Vector2(0.88f, 0.47f));
+        sensitivitySlider = sliderObject.AddComponent<Slider>();
+        sensitivitySlider.minValue = MinSensitivity;
+        sensitivitySlider.maxValue = MaxSensitivity;
+        sensitivitySlider.value = PlayerPrefs.GetFloat("MouseSensitivity", DefaultSensitivity);
+        sensitivitySlider.wholeNumbers = false;
+        sensitivitySlider.onValueChanged.AddListener(SetSensitivity);
 
-        // Street lamp.
-        FillRect(texture, 207, 76, 3, 70, new Color(0.08f, 0.08f, 0.07f));
-        FillRect(texture, 207, 144, 21, 3, new Color(0.08f, 0.08f, 0.07f));
-        FillRect(texture, 223, 140, 7, 4, new Color(0.72f, 0.64f, 0.43f));
+        GameObject track = CreateUIObject("Track", sliderObject.transform);
+        Image trackImage = track.AddComponent<Image>();
+        trackImage.color = new Color(0.35f, 0.35f, 0.32f, 1f);
+        Stretch(track.transform);
 
-        // Old yellow bus.
-        FillRect(texture, 228, 35, 70, 76, new Color(0.28f, 0.25f, 0.12f));
-        FillRect(texture, 232, 42, 62, 52, new Color(0.16f, 0.16f, 0.13f));
-        FillRect(texture, 228, 35, 70, 8, new Color(0.33f, 0.29f, 0.13f));
-        FillRect(texture, 231, 94, 64, 15, new Color(0.36f, 0.31f, 0.12f));
-        FillRect(texture, 237, 50, 12, 28, new Color(0.07f, 0.08f, 0.075f));
-        FillRect(texture, 252, 50, 12, 28, new Color(0.07f, 0.08f, 0.075f));
-        FillRect(texture, 267, 50, 18, 28, new Color(0.07f, 0.08f, 0.075f));
-        FillRect(texture, 236, 96, 10, 8, new Color(0.78f, 0.67f, 0.39f));
-        FillRect(texture, 280, 96, 10, 8, new Color(0.78f, 0.67f, 0.39f));
-        FillRect(texture, 252, 39, 26, 5, new Color(0.65f, 0.44f, 0.16f));
+        GameObject fill = CreateUIObject("Fill", sliderObject.transform);
+        Image fillImage = fill.AddComponent<Image>();
+        fillImage.color = selectedColor;
+        SetAnchors(fill.GetComponent<RectTransform>(), new Vector2(0f, 0f), new Vector2(0.5f, 1f));
+        sensitivitySlider.fillRect = fill.GetComponent<RectTransform>();
 
-        // Low-resolution VHS noise.
-        Random.InitState(1337);
-        for (int i = 0; i < 2600; i++)
-        {
-            int x = Random.Range(0, width);
-            int y = Random.Range(0, height);
-            Color old = texture.GetPixel(x, y);
-            float n = Random.Range(-0.035f, 0.035f);
-            texture.SetPixel(x, y, new Color(Mathf.Clamp01(old.r + n), Mathf.Clamp01(old.g + n), Mathf.Clamp01(old.b + n), 1f));
-        }
+        GameObject handle = CreateUIObject("Handle", sliderObject.transform);
+        Image handleImage = handle.AddComponent<Image>();
+        handleImage.color = textColor;
+        SetAnchors(handle.GetComponent<RectTransform>(), new Vector2(0f, 0f), new Vector2(0f, 1f));
+        handle.GetComponent<RectTransform>().sizeDelta = new Vector2(18f, 0f);
+        sensitivitySlider.handleRect = handle.GetComponent<RectTransform>();
+        sensitivitySlider.direction = Slider.Direction.LeftToRight;
 
-        texture.Apply();
-        return Sprite.Create(texture, new Rect(0, 0, width, height), new Vector2(0.5f, 0.5f), 100f);
+        Button backButton = CreateButton("BACK", settingsPanel.transform, new Vector2(0.35f, 0.10f), new Vector2(0.65f, 0.22f), 24);
+        backButton.onClick.AddListener(CloseSettings);
+        settingsPanel.SetActive(false);
     }
 
-    private Sprite CreateScanlineSprite()
+    private Button CreateButton(string text, Transform parent, Vector2 min, Vector2 max, float size)
     {
-        Texture2D texture = new Texture2D(2, 4, TextureFormat.RGBA32, false);
-        texture.filterMode = FilterMode.Point;
-        for (int y = 0; y < 4; y++)
-        {
-            Color c = y == 0 ? new Color(0, 0, 0, 0.45f) : new Color(0, 0, 0, 0f);
-            texture.SetPixel(0, y, c);
-            texture.SetPixel(1, y, c);
-        }
-        texture.Apply();
-        return Sprite.Create(texture, new Rect(0, 0, 2, 4), new Vector2(0.5f, 0.5f), 1f);
+        GameObject obj = CreateUIObject(text, parent);
+        SetAnchors(obj.GetComponent<RectTransform>(), min, max);
+        Button button = obj.AddComponent<Button>();
+        Image image = obj.AddComponent<Image>();
+        image.color = new Color(0f, 0f, 0f, 0f);
+        button.targetGraphic = image;
+        TextMeshProUGUI label = CreateText(text, obj.transform, size, FontStyles.Normal, TextAlignmentOptions.Center);
+        label.color = textColor;
+        Stretch(label.transform);
+        return button;
     }
 
-    private static void DrawTree(Texture2D texture, int x, int baseY, int height)
+    private void SetSensitivity(float value)
     {
-        Color trunk = new Color(0.035f, 0.04f, 0.034f);
-        Color leaves = new Color(0.018f, 0.028f, 0.026f);
-        int trunkW = Mathf.Max(2, height / 12);
-        FillRect(texture, x - trunkW / 2, baseY, trunkW, height / 2, trunk);
-        for (int y = baseY + height / 3; y < baseY + height; y += 6)
-        {
-            int half = Mathf.RoundToInt((y - baseY) * 0.22f);
-            FillRect(texture, x - half, y, half * 2 + 1, 8, leaves);
-        }
-    }
-
-    private static void FillRect(Texture2D texture, int x, int y, int width, int height, Color color)
-    {
-        int maxX = texture.width - 1;
-        int maxY = texture.height - 1;
-        for (int px = Mathf.Max(0, x); px <= Mathf.Min(maxX, x + width - 1); px++)
-            for (int py = Mathf.Max(0, y); py <= Mathf.Min(maxY, y + height - 1); py++)
-                texture.SetPixel(px, py, color);
-    }
-
-    private IEnumerator FadeIn()
-    {
-        float time = 0f;
-        while (time < 1f)
-        {
-            time += Time.unscaledDeltaTime;
-            fadeGroup.alpha = Mathf.SmoothStep(0f, 1f, time);
-            yield return null;
-        }
-        fadeGroup.alpha = 1f;
+        value = Mathf.Clamp(value, MinSensitivity, MaxSensitivity);
+        PlayerPrefs.SetFloat("MouseSensitivity", value);
+        PlayerPrefs.Save();
+        if (sensitivityValue != null) sensitivityValue.text = value.ToString("0.0");
     }
 
     private void ChangeSelection(int direction)
     {
-        if (controlsOpen) return;
         selectedIndex += direction;
         if (selectedIndex < 0) selectedIndex = buttons.Length - 1;
         if (selectedIndex >= buttons.Length) selectedIndex = 0;
@@ -265,30 +213,36 @@ public class StartScreenUI : MonoBehaviour
 
     private void ActivateSelection()
     {
-        if (controlsOpen) return;
-        switch (selectedIndex)
+        if (selectedIndex == 0) StartCoroutine(StartGame());
+        else if (selectedIndex == 1) OpenSettings();
+        else Application.Quit();
+    }
+
+    private void OpenSettings()
+    {
+        settingsOpen = true;
+        settingsPanel.SetActive(true);
+        sensitivitySlider.value = PlayerPrefs.GetFloat("MouseSensitivity", DefaultSensitivity);
+        Cursor.visible = true;
+        Cursor.lockState = CursorLockMode.None;
+    }
+
+    private void CloseSettings()
+    {
+        settingsOpen = false;
+        settingsPanel.SetActive(false);
+    }
+
+    private IEnumerator FadeIn()
+    {
+        float time = 0f;
+        while (time < 1f)
         {
-            case 0: StartCoroutine(StartGame()); break;
-            case 1: ShowControls(); break;
-            case 2: Application.Quit(); break;
+            time += Time.unscaledDeltaTime;
+            fadeGroup.alpha = Mathf.SmoothStep(0f, 1f, time);
+            yield return null;
         }
-    }
-
-    private void ShowControls()
-    {
-        controlsOpen = true;
-        controlsText.gameObject.SetActive(true);
-        foreach (TextMeshProUGUI button in buttons) button.gameObject.SetActive(false);
-        subtitle.text = "HOW TO SURVIVE THE NIGHT";
-    }
-
-    private void CloseControls()
-    {
-        controlsOpen = false;
-        controlsText.gameObject.SetActive(false);
-        foreach (TextMeshProUGUI button in buttons) button.gameObject.SetActive(true);
-        subtitle.text = "THE LAST BUS IS WAITING.";
-        UpdateSelection();
+        fadeGroup.alpha = 1f;
     }
 
     private IEnumerator StartGame()
@@ -302,6 +256,14 @@ public class StartScreenUI : MonoBehaviour
             yield return null;
         }
         SceneManager.LoadScene(gameSceneName);
+    }
+
+    private static void EnsureEventSystem()
+    {
+        if (FindFirstObjectByType<UnityEngine.EventSystems.EventSystem>() != null) return;
+        GameObject eventSystem = new GameObject("EventSystem");
+        eventSystem.AddComponent<UnityEngine.EventSystems.EventSystem>();
+        eventSystem.AddComponent<UnityEngine.EventSystems.StandaloneInputModule>();
     }
 
     private static GameObject CreateUIObject(string objectName, Transform parent)
@@ -319,8 +281,7 @@ public class StartScreenUI : MonoBehaviour
         tmp.fontSize = size;
         tmp.fontStyle = style;
         tmp.alignment = alignment;
-        tmp.enableWordWrapping = true;
-        tmp.overflowMode = TextOverflowModes.Overflow;
+        tmp.enableWordWrapping = false;
         return tmp;
     }
 
