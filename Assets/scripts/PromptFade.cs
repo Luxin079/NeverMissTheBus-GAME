@@ -1,110 +1,230 @@
 using UnityEngine;
+using UnityEngine.UI;
 using System.Collections;
 
 public class PromptFade : MonoBehaviour
 {
-    [Header("Objects to Fade")]
-    public GameObject spriteContainer;
-    public GameObject textContainer;
+    [Header("UI Container (drag the parent of your pickup UI here)")]
+    [Tooltip("Drag the parent GameObject of your pickup UI. The parent and all children (world-space Canvas, UI Graphics, SpriteRenderers, Meshes) will be hidden until the player enters the trigger.")]
+    public GameObject uiContainer;
 
-    [Header("Fade Settings")]
+    [Header("Runtime")]
+    [Tooltip("Tag used to identify the player")]
+    public string playerTag = "Player";
+
+    [Tooltip("How fast the UI fades in/out")]
     public float fadeSpeed = 5f;
 
-    private SpriteRenderer[] sprites;
-    private CanvasGroup textCanvasGroup;
+    private CanvasGroup canvasGroup;
+    private Graphic[] uiGraphics;
+    private SpriteRenderer[] spriteRenderers;
+    private Renderer[] otherRenderers;
+
+    // detection fallback for CharacterController (no Rigidbody)
+    private bool useOverlapFallback;
+    private Collider myCollider;
+    private GameObject playerInstance;
+    private bool playerInside;
 
     private Coroutine fadeRoutine;
 
-
     private void Awake()
     {
-        // Vind alle squares
-        if (spriteContainer != null)
-            sprites = spriteContainer.GetComponentsInChildren<SpriteRenderer>(true);
+        if (uiContainer == null)
+        {
+            Debug.LogWarning($"{name}: uiContainer not assigned — using this GameObject as container.");
+            uiContainer = gameObject;
+        }
 
-        // Vind CanvasGroup van tekst
-        if (textContainer != null)
-            textCanvasGroup = textContainer.GetComponentInChildren<CanvasGroup>();
+        // collect components from the container and all children (include inactive)
+        uiGraphics = uiContainer.GetComponentsInChildren<Graphic>(true);
+        spriteRenderers = uiContainer.GetComponentsInChildren<SpriteRenderer>(true);
+        otherRenderers = uiContainer.GetComponentsInChildren<Renderer>(true);
 
-        SetAlpha(0);
+        // prefer an existing CanvasGroup on the container; add if missing so we can fade whole world-space Canvas / UI group
+        canvasGroup = uiContainer.GetComponent<CanvasGroup>();
+        if (canvasGroup == null)
+            canvasGroup = uiContainer.AddComponent<CanvasGroup>();
+
+        // start hidden
+        SetAlphaImmediate(0f);
+
+        myCollider = GetComponent<Collider>();
+        if (myCollider == null)
+            Debug.LogWarning($"{name}: No Collider found on the PromptFade object. Add a Collider and set 'Is Trigger'.");
+
+        // detect player and whether it has a Rigidbody
+        playerInstance = GameObject.FindWithTag(playerTag);
+        if (playerInstance != null)
+        {
+            useOverlapFallback = playerInstance.GetComponent<Rigidbody>() == null;
+        }
+        else
+        {
+            useOverlapFallback = true;
+        }
     }
 
+    private void Update()
+    {
+        if (!useOverlapFallback) return;
+        if (myCollider == null) return;
+
+        // Overlap fallback using the trigger collider's bounds (AABB).
+        Bounds b = myCollider.bounds;
+        Collider[] hits = Physics.OverlapBox(b.center, b.extents, Quaternion.identity);
+
+        bool found = false;
+        foreach (var h in hits)
+        {
+            if (h != null && h.CompareTag(playerTag))
+            {
+                found = true;
+                break;
+            }
+        }
+
+        if (found && !playerInside)
+        {
+            playerInside = true;
+            FadeTo(1f);
+        }
+        else if (!found && playerInside)
+        {
+            playerInside = false;
+            FadeTo(0f);
+        }
+    }
 
     private void OnTriggerEnter(Collider other)
     {
-        if (!other.CompareTag("Player"))
-            return;
-
-        FadeTo(1);
+        // will work when a Rigidbody is present (recommended but not required with overlap fallback)
+        if (!other.CompareTag(playerTag)) return;
+        FadeTo(1f);
     }
-
 
     private void OnTriggerExit(Collider other)
     {
-        if (!other.CompareTag("Player"))
-            return;
-
-        FadeTo(0);
+        if (!other.CompareTag(playerTag)) return;
+        FadeTo(0f);
     }
-
 
     private void FadeTo(float target)
     {
-        if (fadeRoutine != null)
-            StopCoroutine(fadeRoutine);
-
-        fadeRoutine = StartCoroutine(Fade(target));
+        if (fadeRoutine != null) StopCoroutine(fadeRoutine);
+        fadeRoutine = StartCoroutine(FadeCoroutine(target));
     }
 
-
-    private IEnumerator Fade(float target)
+    private IEnumerator FadeCoroutine(float target)
     {
         float current = GetCurrentAlpha();
 
         while (!Mathf.Approximately(current, target))
         {
-            current = Mathf.MoveTowards(
-                current,
-                target,
-                fadeSpeed * Time.deltaTime
-            );
-
+            current = Mathf.MoveTowards(current, target, fadeSpeed * Time.deltaTime);
             SetAlpha(current);
-
             yield return null;
         }
-    }
 
+        FinalizeVisibility(target);
+    }
 
     private void SetAlpha(float alpha)
     {
-        // Squares
-        if (sprites != null)
+        // CanvasGroup controls whole group including world-space Canvas
+        if (canvasGroup != null)
         {
-            foreach (SpriteRenderer sprite in sprites)
+            canvasGroup.alpha = alpha;
+            canvasGroup.blocksRaycasts = alpha > 0.001f;
+            canvasGroup.interactable = alpha > 0.001f;
+        }
+
+        // UI Graphics (Image, Text, TMP etc.)
+        if (uiGraphics != null)
+        {
+            foreach (var g in uiGraphics)
             {
-                Color color = sprite.color;
-                color.a = alpha;
-                sprite.color = color;
+                if (g == null) continue;
+                Color c = g.color;
+                c.a = alpha;
+                g.color = c;
             }
         }
 
-        // Tekst
-        if (textCanvasGroup != null)
+        // SpriteRenderers (e.g. textbox sprite children)
+        if (spriteRenderers != null)
         {
-            textCanvasGroup.alpha = alpha;
+            foreach (var s in spriteRenderers)
+            {
+                if (s == null) continue;
+                Color c = s.color;
+                c.a = alpha;
+                s.color = c;
+            }
+        }
+
+        // Other renderers (meshes). Toggle enabled when effectively invisible/visible.
+        if (otherRenderers != null)
+        {
+            bool shouldEnable = alpha > 0.001f;
+            foreach (var r in otherRenderers)
+            {
+                if (r == null) continue;
+                r.enabled = shouldEnable;
+            }
         }
     }
 
+    private void SetAlphaImmediate(float alpha)
+    {
+        if (canvasGroup != null)
+        {
+            canvasGroup.alpha = alpha;
+            canvasGroup.blocksRaycasts = false;
+            canvasGroup.interactable = false;
+        }
+
+        if (uiGraphics != null)
+        {
+            foreach (var g in uiGraphics) if (g != null) { Color c = g.color; c.a = alpha; g.color = c; }
+        }
+
+        if (spriteRenderers != null)
+        {
+            foreach (var s in spriteRenderers) if (s != null) { Color c = s.color; c.a = alpha; s.color = c; }
+        }
+
+        if (otherRenderers != null)
+        {
+            bool shouldEnable = alpha > 0.001f;
+            foreach (var r in otherRenderers) if (r != null) r.enabled = shouldEnable;
+        }
+    }
+
+    private void FinalizeVisibility(float alpha)
+    {
+        bool visible = alpha > 0.001f;
+        if (otherRenderers != null)
+        {
+            foreach (var r in otherRenderers) if (r != null) r.enabled = visible;
+        }
+    }
 
     private float GetCurrentAlpha()
     {
-        if (textCanvasGroup != null)
-            return textCanvasGroup.alpha;
+        if (canvasGroup != null) return canvasGroup.alpha;
+        if (uiGraphics != null && uiGraphics.Length > 0 && uiGraphics[0] != null) return uiGraphics[0].color.a;
+        if (spriteRenderers != null && spriteRenderers.Length > 0 && spriteRenderers[0] != null) return spriteRenderers[0].color.a;
+        return 0f;
+    }
 
-        if (sprites != null && sprites.Length > 0)
-            return sprites[0].color.a;
-
-        return 0;
+    // Visual helper in Scene view
+    private void OnDrawGizmosSelected()
+    {
+        if (myCollider == null) myCollider = GetComponent<Collider>();
+        if (myCollider == null) return;
+        Gizmos.color = Color.cyan;
+        Bounds b = myCollider.bounds;
+        Gizmos.DrawWireCube(b.center, b.size);
     }
 }
