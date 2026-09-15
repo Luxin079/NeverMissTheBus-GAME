@@ -11,45 +11,37 @@ public class StartScreenUI : MonoBehaviour
     [SerializeField] private Color selectedColor = new Color(0.95f, 0.78f, 0.42f, 1f);
 
     private CanvasGroup fadeGroup;
-    private TextMeshProUGUI subtitle;
-    private TextMeshProUGUI controls;
     private TextMeshProUGUI[] buttons;
+    private TextMeshProUGUI sensitivityValue;
+    private GameObject settingsPanel;
+    private Slider sensitivitySlider;
     private int selectedIndex;
-    private bool controlsOpen;
-    private float flickerTimer;
+    private bool settingsOpen;
+
+    private const float MinSensitivity = 0.1f;
+    private const float MaxSensitivity = 5f;
+    private const float DefaultSensitivity = 2f;
 
     private void Awake()
     {
         Cursor.visible = true;
         Cursor.lockState = CursorLockMode.None;
+        EnsureEventSystem();
         BuildMenu();
     }
 
     private void Update()
     {
-        if (buttons == null) return;
-
-        if (Input.GetKeyDown(KeyCode.Escape) && controlsOpen)
+        if (settingsOpen)
         {
-            CloseControls();
+            if (Input.GetKeyDown(KeyCode.Escape)) CloseSettings();
             return;
         }
 
-        if (controlsOpen) return;
-
+        if (buttons == null) return;
         if (Input.GetKeyDown(KeyCode.W) || Input.GetKeyDown(KeyCode.UpArrow)) ChangeSelection(-1);
         if (Input.GetKeyDown(KeyCode.S) || Input.GetKeyDown(KeyCode.DownArrow)) ChangeSelection(1);
         if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.Space)) ActivateSelection();
-
-        flickerTimer += Time.unscaledDeltaTime;
-        if (flickerTimer > 0.08f)
-        {
-            flickerTimer = 0f;
-            // Small title flicker only. The actual background is the supplied image asset.
-            GameObject titleObject = GameObject.Find("Menu Title");
-            if (titleObject != null)
-                titleObject.GetComponent<TextMeshProUGUI>().alpha = Random.Range(0.91f, 1f);
-        }
     }
 
     private void BuildMenu()
@@ -64,74 +56,140 @@ public class StartScreenUI : MonoBehaviour
         scaler.referenceResolution = new Vector2(1920, 1080);
         canvasObject.AddComponent<GraphicRaycaster>();
 
-        // THE USER-SUPPLIED ART. No procedural background is generated.
-        Texture2D backgroundTexture = Resources.Load<Texture2D>("MainMenuBackground");
+        Texture2D art = Resources.Load<Texture2D>("MainMenuBackground");
         GameObject background = CreateUIObject("Background Art", canvas.transform);
-        RawImage backgroundImage = background.AddComponent<RawImage>();
-        backgroundImage.texture = backgroundTexture;
-        backgroundImage.color = Color.white;
+        RawImage raw = background.AddComponent<RawImage>();
+        raw.texture = art;
+        raw.color = Color.white;
+        raw.raycastTarget = false;
+        AspectRatioFitter aspect = background.AddComponent<AspectRatioFitter>();
+        aspect.aspectMode = AspectRatioFitter.AspectMode.EnvelopeParent;
+        aspect.aspectRatio = 1.5f;
         Stretch(background.transform);
 
-        // Covers the baked-in title/menu on the left so our real interactive UI is used instead.
-        GameObject leftPanel = CreateUIObject("Menu Backplate", canvas.transform);
-        Image leftImage = leftPanel.AddComponent<Image>();
-        leftImage.color = new Color(0f, 0f, 0f, 0.78f);
-        RectTransform leftRect = leftPanel.GetComponent<RectTransform>();
-        leftRect.anchorMin = new Vector2(0f, 0f);
-        leftRect.anchorMax = new Vector2(0.47f, 1f);
-        leftRect.offsetMin = Vector2.zero;
-        leftRect.offsetMax = Vector2.zero;
+        // Only covers the baked-in menu labels from the artwork. The title and scene remain untouched.
+        GameObject menuBackplate = CreateUIObject("Interactive Menu Backplate", canvas.transform);
+        Image backplateImage = menuBackplate.AddComponent<Image>();
+        backplateImage.color = new Color(0f, 0f, 0f, 0.72f);
+        SetAnchors(menuBackplate.GetComponent<RectTransform>(), new Vector2(0.065f, 0.27f), new Vector2(0.43f, 0.55f));
 
-        GameObject vignette = CreateUIObject("Dark Overlay", canvas.transform);
-        Image vignetteImage = vignette.AddComponent<Image>();
-        vignetteImage.color = new Color(0f, 0f, 0f, 0.18f);
-        Stretch(vignette.transform);
+        GameObject menu = CreateUIObject("Interactive Menu", canvas.transform);
+        SetAnchors(menu.GetComponent<RectTransform>(), new Vector2(0.075f, 0.25f), new Vector2(0.43f, 0.56f));
 
-        GameObject panel = CreateUIObject("Menu UI", canvas.transform);
-        RectTransform panelRect = panel.GetComponent<RectTransform>();
-        panelRect.anchorMin = new Vector2(0.055f, 0.12f);
-        panelRect.anchorMax = new Vector2(0.44f, 0.88f);
-        panelRect.offsetMin = Vector2.zero;
-        panelRect.offsetMax = Vector2.zero;
-
-        TextMeshProUGUI title = CreateText("NEVER MISS\nTHE BUS", panel.transform, 70, FontStyles.Bold, TextAlignmentOptions.Center);
-        title.gameObject.name = "Menu Title";
-        title.color = textColor;
-        SetAnchors(title.rectTransform, new Vector2(0.02f, 0.68f), new Vector2(0.98f, 0.96f));
-
-        subtitle = CreateText("THE LAST BUS IS WAITING.", panel.transform, 17, FontStyles.Normal, TextAlignmentOptions.Center);
-        subtitle.color = new Color(textColor.r, textColor.g, textColor.b, 0.7f);
-        SetAnchors(subtitle.rectTransform, new Vector2(0.05f, 0.60f), new Vector2(0.95f, 0.66f));
-
-        string[] labels = { "START GAME", "CONTROLS", "QUIT" };
+        string[] labels = { "START GAME", "SETTINGS", "QUIT" };
         buttons = new TextMeshProUGUI[labels.Length];
+
         for (int i = 0; i < labels.Length; i++)
         {
-            buttons[i] = CreateText(labels[i], panel.transform, 28, FontStyles.Normal, TextAlignmentOptions.Left);
-            float y = 0.47f - i * 0.11f;
-            SetAnchors(buttons[i].rectTransform, new Vector2(0.18f, y - 0.05f), new Vector2(0.84f, y + 0.05f));
-            buttons[i].raycastTarget = false;
+            int index = i;
+            GameObject buttonObject = CreateUIObject(labels[i], menu.transform);
+            RectTransform rect = buttonObject.GetComponent<RectTransform>();
+            float y = 0.78f - i * 0.31f;
+            SetAnchors(rect, new Vector2(0.10f, y - 0.13f), new Vector2(0.95f, y + 0.13f));
+
+            Button button = buttonObject.AddComponent<Button>();
+            Image hitImage = buttonObject.AddComponent<Image>();
+            hitImage.color = new Color(0f, 0f, 0f, 0f);
+            hitImage.raycastTarget = true;
+            button.targetGraphic = hitImage;
+            button.onClick.AddListener(() => { selectedIndex = index; ActivateSelection(); });
+
+            TextMeshProUGUI text = CreateText(labels[i], buttonObject.transform, 28, FontStyles.Normal, TextAlignmentOptions.Left);
+            text.raycastTarget = false;
+            Stretch(text.transform);
+            text.rectTransform.offsetMin = new Vector2(35f, 0f);
+            text.rectTransform.offsetMax = Vector2.zero;
+            buttons[i] = text;
         }
 
-        controls = CreateText(
-            "CONTROLS\n\nW A S D     MOVE\nSHIFT       RUN\nC           CROUCH\nSPACE       JUMP\nF           FLASHLIGHT\nMOUSE       LOOK\n\nESC         BACK",
-            panel.transform, 21, FontStyles.Normal, TextAlignmentOptions.Left);
-        controls.color = textColor;
-        SetAnchors(controls.rectTransform, new Vector2(0.16f, 0.18f), new Vector2(0.88f, 0.58f));
-        controls.gameObject.SetActive(false);
-
         TextMeshProUGUI hint = CreateText("W / S  SELECT     ENTER  CONFIRM", canvas.transform, 15, FontStyles.Normal, TextAlignmentOptions.Center);
-        hint.color = new Color(textColor.r, textColor.g, textColor.b, 0.5f);
-        SetAnchors(hint.rectTransform, new Vector2(0.055f, 0.045f), new Vector2(0.44f, 0.085f));
+        hint.color = new Color(textColor.r, textColor.g, textColor.b, 0.48f);
+        SetAnchors(hint.rectTransform, new Vector2(0.065f, 0.045f), new Vector2(0.43f, 0.085f));
 
         TextMeshProUGUI version = CreateText("NMTB // 01", canvas.transform, 13, FontStyles.Normal, TextAlignmentOptions.Right);
         version.color = new Color(textColor.r, textColor.g, textColor.b, 0.3f);
         SetAnchors(version.rectTransform, new Vector2(0.88f, 0.025f), new Vector2(0.975f, 0.055f));
 
+        BuildSettings(canvas.transform);
+
         fadeGroup = canvasObject.AddComponent<CanvasGroup>();
         fadeGroup.alpha = 0f;
         StartCoroutine(FadeIn());
         UpdateSelection();
+    }
+
+    private void BuildSettings(Transform canvas)
+    {
+        settingsPanel = CreateUIObject("Settings Panel", canvas);
+        Image panelImage = settingsPanel.AddComponent<Image>();
+        panelImage.color = new Color(0.015f, 0.018f, 0.017f, 0.96f);
+        SetAnchors(settingsPanel.GetComponent<RectTransform>(), new Vector2(0.27f, 0.20f), new Vector2(0.73f, 0.80f));
+
+        TextMeshProUGUI title = CreateText("SETTINGS", settingsPanel.transform, 42, FontStyles.Bold, TextAlignmentOptions.Center);
+        title.color = textColor;
+        SetAnchors(title.rectTransform, new Vector2(0.10f, 0.72f), new Vector2(0.90f, 0.90f));
+
+        TextMeshProUGUI label = CreateText("MOUSE SENSITIVITY", settingsPanel.transform, 22, FontStyles.Normal, TextAlignmentOptions.Left);
+        label.color = textColor;
+        SetAnchors(label.rectTransform, new Vector2(0.12f, 0.53f), new Vector2(0.55f, 0.64f));
+
+        sensitivityValue = CreateText("2.0", settingsPanel.transform, 22, FontStyles.Bold, TextAlignmentOptions.Right);
+        sensitivityValue.color = selectedColor;
+        SetAnchors(sensitivityValue.rectTransform, new Vector2(0.65f, 0.53f), new Vector2(0.88f, 0.64f));
+
+        GameObject sliderObject = CreateUIObject("Sensitivity Slider", settingsPanel.transform);
+        SetAnchors(sliderObject.GetComponent<RectTransform>(), new Vector2(0.12f, 0.39f), new Vector2(0.88f, 0.47f));
+        sensitivitySlider = sliderObject.AddComponent<Slider>();
+        sensitivitySlider.minValue = MinSensitivity;
+        sensitivitySlider.maxValue = MaxSensitivity;
+        sensitivitySlider.value = PlayerPrefs.GetFloat("MouseSensitivity", DefaultSensitivity);
+        sensitivitySlider.wholeNumbers = false;
+        sensitivitySlider.onValueChanged.AddListener(SetSensitivity);
+
+        GameObject track = CreateUIObject("Track", sliderObject.transform);
+        Image trackImage = track.AddComponent<Image>();
+        trackImage.color = new Color(0.35f, 0.35f, 0.32f, 1f);
+        Stretch(track.transform);
+
+        GameObject fill = CreateUIObject("Fill", sliderObject.transform);
+        Image fillImage = fill.AddComponent<Image>();
+        fillImage.color = selectedColor;
+        SetAnchors(fill.GetComponent<RectTransform>(), new Vector2(0f, 0f), new Vector2(0.5f, 1f));
+        sensitivitySlider.fillRect = fill.GetComponent<RectTransform>();
+
+        GameObject handle = CreateUIObject("Handle", sliderObject.transform);
+        Image handleImage = handle.AddComponent<Image>();
+        handleImage.color = textColor;
+        SetAnchors(handle.GetComponent<RectTransform>(), new Vector2(0f, 0f), new Vector2(0f, 1f));
+        handle.GetComponent<RectTransform>().sizeDelta = new Vector2(18f, 0f);
+        sensitivitySlider.handleRect = handle.GetComponent<RectTransform>();
+        sensitivitySlider.direction = Slider.Direction.LeftToRight;
+
+        Button backButton = CreateButton("BACK", settingsPanel.transform, new Vector2(0.35f, 0.10f), new Vector2(0.65f, 0.22f), 24);
+        backButton.onClick.AddListener(CloseSettings);
+        settingsPanel.SetActive(false);
+    }
+
+    private Button CreateButton(string text, Transform parent, Vector2 min, Vector2 max, float size)
+    {
+        GameObject obj = CreateUIObject(text, parent);
+        SetAnchors(obj.GetComponent<RectTransform>(), min, max);
+        Button button = obj.AddComponent<Button>();
+        Image image = obj.AddComponent<Image>();
+        image.color = new Color(0f, 0f, 0f, 0f);
+        button.targetGraphic = image;
+        TextMeshProUGUI label = CreateText(text, obj.transform, size, FontStyles.Normal, TextAlignmentOptions.Center);
+        label.color = textColor;
+        Stretch(label.transform);
+        return button;
+    }
+
+    private void SetSensitivity(float value)
+    {
+        value = Mathf.Clamp(value, MinSensitivity, MaxSensitivity);
+        PlayerPrefs.SetFloat("MouseSensitivity", value);
+        PlayerPrefs.Save();
+        if (sensitivityValue != null) sensitivityValue.text = value.ToString("0.0");
     }
 
     private void ChangeSelection(int direction)
@@ -156,25 +214,23 @@ public class StartScreenUI : MonoBehaviour
     private void ActivateSelection()
     {
         if (selectedIndex == 0) StartCoroutine(StartGame());
-        else if (selectedIndex == 1) ShowControls();
+        else if (selectedIndex == 1) OpenSettings();
         else Application.Quit();
     }
 
-    private void ShowControls()
+    private void OpenSettings()
     {
-        controlsOpen = true;
-        controls.gameObject.SetActive(true);
-        foreach (TextMeshProUGUI button in buttons) button.gameObject.SetActive(false);
-        subtitle.text = "HOW TO SURVIVE THE NIGHT";
+        settingsOpen = true;
+        settingsPanel.SetActive(true);
+        sensitivitySlider.value = PlayerPrefs.GetFloat("MouseSensitivity", DefaultSensitivity);
+        Cursor.visible = true;
+        Cursor.lockState = CursorLockMode.None;
     }
 
-    private void CloseControls()
+    private void CloseSettings()
     {
-        controlsOpen = false;
-        controls.gameObject.SetActive(false);
-        foreach (TextMeshProUGUI button in buttons) button.gameObject.SetActive(true);
-        subtitle.text = "THE LAST BUS IS WAITING.";
-        UpdateSelection();
+        settingsOpen = false;
+        settingsPanel.SetActive(false);
     }
 
     private IEnumerator FadeIn()
@@ -200,6 +256,14 @@ public class StartScreenUI : MonoBehaviour
             yield return null;
         }
         SceneManager.LoadScene(gameSceneName);
+    }
+
+    private static void EnsureEventSystem()
+    {
+        if (FindFirstObjectByType<UnityEngine.EventSystems.EventSystem>() != null) return;
+        GameObject eventSystem = new GameObject("EventSystem");
+        eventSystem.AddComponent<UnityEngine.EventSystems.EventSystem>();
+        eventSystem.AddComponent<UnityEngine.EventSystems.StandaloneInputModule>();
     }
 
     private static GameObject CreateUIObject(string objectName, Transform parent)
