@@ -17,7 +17,7 @@ public class DialogueManager : MonoBehaviour
     private Dialogue currentDialogue;
     private int currentIndex;
     private Coroutine typingRoutine;
-    private bool isTyping;
+    private bool isTyping;\n\n    public bool IsDialogueActive => dialoguePanel != null && dialoguePanel.activeSelf;
 
     void Awake()
     {
