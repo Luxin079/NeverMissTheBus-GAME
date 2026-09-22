@@ -22,12 +22,12 @@ public class DialogueManager : MonoBehaviour
     void Awake()
     {
         Instance = this;
-        dialoguePanel.SetActive(false);
+        if (dialoguePanel != null) dialoguePanel.SetActive(false);
     }
 
     void Update()
     {
-        if (!dialoguePanel.activeSelf)
+        if (dialoguePanel == null || !dialoguePanel.activeSelf)
             return;
 
         if (Input.GetKeyDown(KeyCode.E))
@@ -49,6 +49,8 @@ public class DialogueManager : MonoBehaviour
 
     public void StartDialogue(Dialogue dialogue)
     {
+        if (dialoguePanel == null || characterNameText == null || dialogueText == null ||
+            dialogue == null || dialogue.lines == null || dialogue.lines.Length == 0) return;
         currentDialogue = dialogue;
         currentIndex = 0;
 

@@ -1,0 +1,265 @@
+#SCENE After School|1|0
+ACTION|The school day has just ended. Three boys walk out of school together.
+Ethan|Finally. We're done.
+Lucas|That was such a long day.
+Noah|Come on. We gotta catch the bus.
+Lucas|Hey, the bus!
+ACTION|They see the bus driving away.
+Noah|Oh no!
+Ethan|We missed it.
+Lucas|Seriously?!
+Noah|Wait. There's still one more bus.
+Lucas|The last bus?
+Noah|Yeah.
+Ethan|Well... better than walking all the way home.
+#SCENE The Last Bus|1|1
+ACTION|The last bus slowly pulls up. The engine sounds old and rough.
+Bus Driver|Get on, boys.
+Lucas|That bus looks really old.
+Ethan|Just get on.
+Noah|Yeah. I just wanna go home.
+ACTION|The boys get on the bus.
+Bus Driver|Take a seat.
+Ethan|Thanks.
+ACTION|The boys sit together.
+#SCENE The Ride Home|1|1
+ACTION|The bus drives through the dark streets.
+Bus Driver|Sit tight, boys.
+Lucas|My mom's gonna be mad.
+Ethan|Why?
+Lucas|I'm gonna be home late.
+Noah|Mine too.
+Ethan|I'm tired.
+Lucas|Me too.
+Noah|We can just sleep until we get there.
+Ethan|Wake me up when we're home.
+ACTION|They lean back. The engine fades into the background. The boys fall asleep.
+#SCENE The Crash|1|1
+SFX|BOOM!!
+ACTION|The boys suddenly wake up.
+Lucas|AH!
+Noah|What was that?!
+Ethan|Did we crash?!
+ACTION|The bus is completely still.
+Lucas|Why did we stop?
+Noah|I don't know.
+Ethan|Let's go see.
+#SCENE The Missing Driver|1|1
+ACTION|The boys slowly walk toward the front of the bus.
+Lucas|Where's the driver?
+Noah|He was right there...
+Ethan|Maybe he got out.
+Lucas|Look.
+ACTION|A pair of broken glasses is lying on the driver's seat.
+Noah|Those are his glasses.
+Ethan|Why are they broken?
+Lucas|Guys...
+Noah|What?
+Lucas|There's blood.
+ACTION|The broken glasses are still on the driver's seat.
+Ethan|We need to get out of here.
+#SCENE The Last Stop|1|2
+ACTION|The boys step outside the bus, at the edge of a small village. Most houses are dark.
+Noah|This isn't our stop.
+Lucas|Where are we?
+Ethan|I don't know.
+Lucas|Where is everyone?
+Noah|Maybe we should ask someone for help.
+ACTION|They walk through the village, looking for someone.
+Ethan|There's nobody here.
+Lucas|Maybe we can find a phone.
+ACTION|They reach the edge of the village. In front of them is a large forest.
+Noah|There's a forest...
+Ethan|We can't go home through that.
+Lucas|Wait.
+ACTION|Lucas notices an old wooden sign near the edge of the forest.
+Lucas|What's that?
+ACTION|They walk closer to the sign.
+Noah|Forest Ranger Station...
+Ethan|There's a ranger living in the forest?
+Lucas|Looks like it.
+Noah|Maybe he has a phone.
+Ethan|Then we should go ask him for help.
+#SCENE Into the Forest|2|3
+ACTION|The boys stand at the entrance of the forest.
+Lucas|Are you sure this is the right way?
+Noah|The sign said the ranger station is somewhere in there.
+Ethan|Let's just follow the path.
+ACTION|They walk into the forest.
+Lucas|I hope this guy is home.
+Noah|Me too.
+Ethan|Just keep walking.
+ACTION|They follow the path deeper into the forest.
+Lucas|How far is this place?
+Noah|I don't know.
+ACTION|After walking for a while, they see a small wooden house through the trees.
+Ethan|Guys...
+Lucas|Is that it?
+Noah|I think that's the ranger's house.
+ACTION|They slowly walk toward it.
+Lucas|Let's hope someone is there.
+Ethan|Yeah.
+#SCENE The Ranger's House|2|4
+ACTION|They approach the small wooden house.
+Noah|Guys!
+Lucas|Is that it?
+Ethan|I think so.
+Lucas|Hello?
+ACTION|No answer.
+Noah|Maybe he's sleeping.
+ACTION|Ethan slowly opens the door.
+Ethan|Hello?
+ACTION|The door creaks open.
+Lucas|Why is the door open?
+Noah|I don't know.
+ACTION|They enter the house.
+#SCENE The Ranger|2|4
+ACTION|The house is dark and quiet.
+Lucas|Hello?
+SFX|A dog barks from the next room.
+Noah|There's a dog!
+Ethan|Why is he barking like that?
+ACTION|The forest ranger is lying on the floor. He is dead.
+Lucas|...
+Noah|Is he... dead?
+Ethan|I think so.
+Lucas|We need to leave.
+ACTION|The dog keeps barking.
+Noah|Wait.
+Ethan|What?
+Noah|Maybe the dog knows where the bus driver went.
+Lucas|How?
+Noah|He might know his smell.
+ACTION|Noah takes out the bus driver's broken glasses.
+Noah|Here.
+Ethan|Careful.
+ACTION|The dog sniffs the glasses, stops barking and looks toward the door.
+Lucas|Look.
+ACTION|The dog walks toward the door.
+Noah|I think he knows.
+Ethan|He's following the smell.
+Lucas|Then let's follow him.
+#SCENE Following the Dog|2|3
+ACTION|The boys follow the dog through the forest.
+Lucas|Where is he going?
+Noah|I don't know.
+Ethan|Just keep up.
+ACTION|They leave the forest and return toward the village.
+Lucas|We're going back.
+Noah|Why would the driver come back here?
+Ethan|Maybe he lives here.
+Lucas|But why would he leave his bus?
+Noah|I don't know...
+ACTION|The dog suddenly stops, staring down a dark path.
+Ethan|What's wrong?
+Lucas|There's something over there.
+#SCENE The Strange House|2|5
+ACTION|The dog leads them down a path to a strange, old house.
+Noah|What is that place?
+Lucas|I don't know.
+Ethan|The dog found it.
+ACTION|The dog walks toward the front door.
+Lucas|Do you think the driver is inside?
+Noah|Maybe.
+Ethan|We have to find out.
+Lucas|I don't like this.
+Noah|Me neither.
+ACTION|Ethan opens the door.
+SFX|CREAK
+Ethan|Hello?
+ACTION|No answer.
+Lucas|Maybe we should go.
+Noah|Wait...
+ACTION|The dog walks inside.
+Ethan|We can't leave him.
+ACTION|The three boys follow the dog inside.
+#SCENE Trapped|3|5
+Lucas|Hello?
+ACTION|Silence.
+Noah|Is anyone here?
+ACTION|Suddenly, the front door slams shut.
+SFX|BANG!!
+Lucas|AH!
+Ethan|Open it!
+ACTION|Ethan grabs the door and tries to open it.
+Ethan|It's stuck!
+Noah|Move!
+ACTION|Noah tries.
+Noah|It won't open!
+Lucas|We're trapped.
+ACTION|The dog starts growling.
+Ethan|Something's here.
+#SCENE Searching the House|3|5
+Noah|We need to find another way out.
+Lucas|Maybe there's a back door.
+Ethan|Let's look.
+ACTION|They search different rooms.
+Lucas|Look at this.
+ACTION|He finds an old bus ticket.
+Noah|That's from our bus.
+Ethan|Why is it here?
+ACTION|They find more things belonging to the bus driver.
+Lucas|His jacket...
+Noah|His keys...
+Ethan|Everything is here.
+SFX|CREAK - a sound comes from upstairs.
+Lucas|Did you hear that?
+Noah|Yeah.
+Ethan|Someone's upstairs.
+#SCENE The Bus Driver|3|5
+ACTION|The boys walk upstairs. A shadow moves at the end of the hallway.
+Lucas|Who's there?
+ACTION|Silence.
+Noah|Hello?
+ACTION|The shadow disappears.
+Ethan|Wait...
+Ethan|Those are the same shoes.
+Lucas|The bus driver...
+Noah|He's here.
+SFX|BANG!!
+ACTION|They turn around. The bus driver is standing at the end of the hallway.
+Lucas|RUN!
+#SCENE The Chase|3|5
+ACTION|The boys run through the house.
+Noah|Where do we go?!
+Ethan|I don't know!
+Lucas|He's coming!
+ACTION|The bus driver walks slowly toward them.
+Noah|Close the door!
+ACTION|They slam a door shut.
+Ethan|Hold it!
+SFX|BANG! Something hits the other side of the door.
+Lucas|He's trying to get in!
+Noah|We need to find a way out!
+#SCENE The Truth|3|5
+ACTION|The boys find more clues throughout the house.
+Lucas|Look at all these pictures.
+Noah|That's the bus driver.
+Ethan|And that's the house.
+Lucas|So he was here before.
+Noah|Something happened to him.
+ACTION|They find the same strange symbol connected to the events in the house.
+Ethan|He's not himself anymore.
+Lucas|What do we do?
+Noah|We have to get out.
+#SCENE Escape|3|5
+ACTION|The boys find a way to unlock the front door.
+Ethan|I got it!
+Lucas|Open it!
+SFX|The lock clicks.
+Noah|GO!
+ACTION|The boys and the dog run toward the door. The driver appears behind them.
+Lucas|RUN!
+ACTION|They burst through the front door. It slams behind them.
+#SCENE End of Chapter 3|3|5
+ACTION|The boys stand outside, breathing heavily.
+Lucas|Are we safe?
+Noah|I... I think so.
+Ethan|Where do we go now?
+ACTION|They look back at the house. The dog growls.
+Lucas|He's still in there.
+Noah|We can't go back.
+Ethan|Let's just go home.
+ACTION|The boys walk away. A light turns on in an upstairs window.
+SFX|LOW BANG
+ACTION|THE END

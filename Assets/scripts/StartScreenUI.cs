@@ -3,20 +3,33 @@ using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 using TMPro;
 using System.Collections;
+using System.Collections.Generic;
+using UnityEngine.EventSystems;
 
 public class StartScreenUI : MonoBehaviour
 {
     [SerializeField] private string gameSceneName = "SampleScene";
     [SerializeField] private Color textColor = new Color(0.78f, 0.78f, 0.70f, 1f);
     [SerializeField] private Color selectedColor = new Color(0.95f, 0.78f, 0.42f, 1f);
+    [Header("Menu transitions")]
+    [SerializeField, Min(0.01f)] private float menuFadeInSeconds = 1.5f;
+    [SerializeField, Min(0.01f)] private float playFadeOutSeconds = 1.2f;
 
     private CanvasGroup fadeGroup;
-    private TextMeshProUGUI[] buttons;
+    private CanvasGroup blackCover;
+    private Coroutine introFade;
+    private bool startingGame;
+    private readonly List<Texture2D> menuGlyphTextures = new List<Texture2D>();
+    private RawImage[] buttons;
+    private RectTransform highlightRect;
+    private RectTransform arrowRect;
     private TextMeshProUGUI sensitivityValue;
     private GameObject settingsPanel;
+    private GameObject controlsPanel;
     private Slider sensitivitySlider;
     private int selectedIndex;
     private bool settingsOpen;
+    private bool controlsOpen;
 
     private const float MinSensitivity = 0.1f;
     private const float MaxSensitivity = 5f;
@@ -26,15 +39,32 @@ public class StartScreenUI : MonoBehaviour
     {
         Cursor.visible = true;
         Cursor.lockState = CursorLockMode.None;
+        // ScreenSpaceOverlay alone does not count as a rendering camera in the Game view.
+        Camera menuCamera = new GameObject("Main Menu Camera").AddComponent<Camera>();
+        menuCamera.clearFlags = CameraClearFlags.SolidColor;
+        menuCamera.backgroundColor = Color.black;
+        menuCamera.cullingMask = 0;
         EnsureEventSystem();
         BuildMenu();
     }
 
+    private void OnDestroy()
+    {
+        foreach (Texture2D texture in menuGlyphTextures)
+            if (texture != null) Destroy(texture);
+    }
+
     private void Update()
     {
+        if (startingGame) return;
         if (settingsOpen)
         {
             if (Input.GetKeyDown(KeyCode.Escape)) CloseSettings();
+            return;
+        }
+        if (controlsOpen)
+        {
+            if (Input.GetKeyDown(KeyCode.Escape)) CloseControls();
             return;
         }
 
@@ -56,36 +86,43 @@ public class StartScreenUI : MonoBehaviour
         scaler.referenceResolution = new Vector2(1920, 1080);
         canvasObject.AddComponent<GraphicRaycaster>();
 
-        Texture2D art = Resources.Load<Texture2D>("MainMenuBackground");
-        GameObject background = CreateUIObject("Background Art", canvas.transform);
+        Texture2D art = Resources.Load<Texture2D>("MainMenuReferenceClean");
+        Texture2D letters = Resources.Load<Texture2D>("MainMenuReferenceTypography");
+        GameObject frame = CreateUIObject("Reference 16:9 layout", canvas.transform);
+        Stretch(frame.transform);
+        AspectRatioFitter frameAspect = frame.AddComponent<AspectRatioFitter>();
+        frameAspect.aspectMode = AspectRatioFitter.AspectMode.FitInParent;
+        frameAspect.aspectRatio = 1672f / 941f;
+        Transform layout = frame.transform;
+
+        GameObject background = CreateUIObject("Background Art", layout);
         RawImage raw = background.AddComponent<RawImage>();
         raw.texture = art;
         raw.color = Color.white;
         raw.raycastTarget = false;
-        AspectRatioFitter aspect = background.AddComponent<AspectRatioFitter>();
-        aspect.aspectMode = AspectRatioFitter.AspectMode.EnvelopeParent;
-        aspect.aspectRatio = 1.5f;
         Stretch(background.transform);
 
-        // Only covers the baked-in menu labels from the artwork. The title and scene remain untouched.
-        GameObject menuBackplate = CreateUIObject("Interactive Menu Backplate", canvas.transform);
-        Image backplateImage = menuBackplate.AddComponent<Image>();
-        backplateImage.color = new Color(0f, 0f, 0f, 0.72f);
-        SetAnchors(menuBackplate.GetComponent<RectTransform>(), new Vector2(0.065f, 0.27f), new Vector2(0.43f, 0.55f));
+        GameObject highlight = CreateUIObject("Highlighted menu row", layout);
+        highlightRect = highlight.GetComponent<RectTransform>();
+        highlight.AddComponent<Image>().color = new Color(0f, 0f, 0f, .43f);
 
-        GameObject menu = CreateUIObject("Interactive Menu", canvas.transform);
-        SetAnchors(menu.GetComponent<RectTransform>(), new Vector2(0.075f, 0.25f), new Vector2(0.43f, 0.56f));
-
-        string[] labels = { "START GAME", "SETTINGS", "QUIT" };
-        buttons = new TextMeshProUGUI[labels.Length];
+        string[] labels = { "START GAME", "CONTROLS", "QUIT" };
+        buttons = new RawImage[labels.Length];
+        int[] left = { 203, 203, 203 };
+        int[] top = { 512, 584, 657 };
+        int[] width = { 250, 220, 125 };
+        int[] height = { 58, 58, 58 };
+        float[] threshold = { 72f, 31f, 29f };
+        float[] solid = { 150f, 55f, 55f };
 
         for (int i = 0; i < labels.Length; i++)
         {
             int index = i;
-            GameObject buttonObject = CreateUIObject(labels[i], menu.transform);
+            GameObject buttonObject = CreateUIObject(labels[i] + " hit area", layout);
             RectTransform rect = buttonObject.GetComponent<RectTransform>();
-            float y = 0.78f - i * 0.31f;
-            SetAnchors(rect, new Vector2(0.10f, y - 0.13f), new Vector2(0.95f, y + 0.13f));
+            float rowBottom = 1f - (top[i] + height[i] + 9f) / 941f;
+            float rowTop = 1f - (top[i] - 8f) / 941f;
+            SetAnchors(rect, new Vector2(.085f, rowBottom), new Vector2(.36f, rowTop));
 
             Button button = buttonObject.AddComponent<Button>();
             Image hitImage = buttonObject.AddComponent<Image>();
@@ -93,28 +130,43 @@ public class StartScreenUI : MonoBehaviour
             hitImage.raycastTarget = true;
             button.targetGraphic = hitImage;
             button.onClick.AddListener(() => { selectedIndex = index; ActivateSelection(); });
+            EventTrigger hover = buttonObject.AddComponent<EventTrigger>();
+            EventTrigger.Entry enter = new EventTrigger.Entry { eventID = EventTriggerType.PointerEnter };
+            enter.callback.AddListener(_ => { selectedIndex = index; UpdateSelection(); });
+            hover.triggers.Add(enter);
 
-            TextMeshProUGUI text = CreateText(labels[i], buttonObject.transform, 28, FontStyles.Normal, TextAlignmentOptions.Left);
-            text.raycastTarget = false;
-            Stretch(text.transform);
-            text.rectTransform.offsetMin = new Vector2(35f, 0f);
-            text.rectTransform.offsetMax = Vector2.zero;
-            buttons[i] = text;
+            GameObject glyphObject = CreateUIObject(labels[i] + " original lettering", layout);
+            RawImage glyph = glyphObject.AddComponent<RawImage>();
+            Texture2D mask = ExtractMenuLettering(letters, left[i], top[i], width[i], height[i], threshold[i], solid[i]);
+            menuGlyphTextures.Add(mask);
+            glyph.texture = mask;
+            glyph.raycastTarget = false;
+            SetImagePixels(glyph.rectTransform, left[i], top[i], width[i], height[i]);
+            buttons[i] = glyph;
         }
 
-        TextMeshProUGUI hint = CreateText("W / S  SELECT     ENTER  CONFIRM", canvas.transform, 15, FontStyles.Normal, TextAlignmentOptions.Center);
-        hint.color = new Color(textColor.r, textColor.g, textColor.b, 0.48f);
-        SetAnchors(hint.rectTransform, new Vector2(0.065f, 0.045f), new Vector2(0.43f, 0.085f));
+        GameObject arrowObject = CreateUIObject("Selection arrow", layout);
+        RawImage arrow = arrowObject.AddComponent<RawImage>();
+        Texture2D arrowMask = ExtractMenuLettering(letters, 149, 515, 37, 53, 72f, 150f);
+        menuGlyphTextures.Add(arrowMask);
+        arrow.texture = arrowMask;
+        arrow.color = new Color(.91f, .92f, .9f);
+        arrow.raycastTarget = false;
+        arrowRect = arrow.rectTransform;
 
-        TextMeshProUGUI version = CreateText("NMTB // 01", canvas.transform, 13, FontStyles.Normal, TextAlignmentOptions.Right);
-        version.color = new Color(textColor.r, textColor.g, textColor.b, 0.3f);
-        SetAnchors(version.rectTransform, new Vector2(0.88f, 0.025f), new Vector2(0.975f, 0.055f));
+        BuildSettings(layout);
+        BuildControls(layout);
 
-        BuildSettings(canvas.transform);
+        GameObject cover = CreateUIObject("Black Transition", canvas.transform);
+        Stretch(cover.transform);
+        cover.AddComponent<Image>().color = Color.black;
+        blackCover = cover.AddComponent<CanvasGroup>();
+        blackCover.alpha = 1f;
+        blackCover.blocksRaycasts = false;
 
         fadeGroup = canvasObject.AddComponent<CanvasGroup>();
-        fadeGroup.alpha = 0f;
-        StartCoroutine(FadeIn());
+        fadeGroup.alpha = 1f;
+        introFade = StartCoroutine(FadeIn());
         UpdateSelection();
     }
 
@@ -142,7 +194,7 @@ public class StartScreenUI : MonoBehaviour
         sensitivitySlider = sliderObject.AddComponent<Slider>();
         sensitivitySlider.minValue = MinSensitivity;
         sensitivitySlider.maxValue = MaxSensitivity;
-        sensitivitySlider.value = PlayerPrefs.GetFloat("MouseSensitivity", DefaultSensitivity);
+        sensitivitySlider.value = GameSaveStore.LoadSensitivity(PlayerPrefs.GetFloat("MouseSensitivity", DefaultSensitivity));
         sensitivitySlider.wholeNumbers = false;
         sensitivitySlider.onValueChanged.AddListener(SetSensitivity);
 
@@ -189,6 +241,7 @@ public class StartScreenUI : MonoBehaviour
         value = Mathf.Clamp(value, MinSensitivity, MaxSensitivity);
         PlayerPrefs.SetFloat("MouseSensitivity", value);
         PlayerPrefs.Save();
+        GameSaveStore.SaveSensitivity(value);
         if (sensitivityValue != null) sensitivityValue.text = value.ToString("0.0");
     }
 
@@ -204,17 +257,19 @@ public class StartScreenUI : MonoBehaviour
     {
         for (int i = 0; i < buttons.Length; i++)
         {
-            bool selected = i == selectedIndex;
-            buttons[i].color = selected ? selectedColor : textColor;
-            buttons[i].fontStyle = selected ? FontStyles.Bold : FontStyles.Normal;
-            buttons[i].text = (selected ? ">  " : "") + buttons[i].text.TrimStart('>', ' ');
+            buttons[i].color = i == selectedIndex
+                ? new Color(.92f, .93f, .91f, 1f)
+                : new Color(.36f, .37f, .38f, 1f);
         }
+        int rowTop = 504 + selectedIndex * 73;
+        SetImagePixels(highlightRect, 190, rowTop, 325, 70);
+        SetImagePixels(arrowRect, 149, 515 + selectedIndex * 73, 37, 53);
     }
 
     private void ActivateSelection()
     {
         if (selectedIndex == 0) StartCoroutine(StartGame());
-        else if (selectedIndex == 1) OpenSettings();
+        else if (selectedIndex == 1) OpenControls();
         else Application.Quit();
     }
 
@@ -222,7 +277,7 @@ public class StartScreenUI : MonoBehaviour
     {
         settingsOpen = true;
         settingsPanel.SetActive(true);
-        sensitivitySlider.value = PlayerPrefs.GetFloat("MouseSensitivity", DefaultSensitivity);
+        sensitivitySlider.value = GameSaveStore.LoadSensitivity(PlayerPrefs.GetFloat("MouseSensitivity", DefaultSensitivity));
         Cursor.visible = true;
         Cursor.lockState = CursorLockMode.None;
     }
@@ -231,30 +286,66 @@ public class StartScreenUI : MonoBehaviour
     {
         settingsOpen = false;
         settingsPanel.SetActive(false);
+        if (controlsOpen) controlsPanel.SetActive(true);
+    }
+
+    private void OpenControls()
+    {
+        controlsOpen = true;
+        controlsPanel.SetActive(true);
+    }
+
+    private void CloseControls()
+    {
+        controlsOpen = false;
+        controlsPanel.SetActive(false);
+    }
+
+    private void BuildControls(Transform canvas)
+    {
+        controlsPanel = CreateUIObject("Controls Panel", canvas);
+        controlsPanel.AddComponent<Image>().color = new Color(.015f, .018f, .017f, .96f);
+        SetAnchors(controlsPanel.GetComponent<RectTransform>(), new Vector2(.27f, .17f), new Vector2(.73f, .83f));
+        var title = CreateText("CONTROLS", controlsPanel.transform, 42, FontStyles.Bold, TextAlignmentOptions.Center);
+        SetAnchors(title.rectTransform, new Vector2(.08f, .75f), new Vector2(.92f, .91f));
+        var details = CreateText("WASD  MOVE     MOUSE  LOOK\nE  INTERACT / CONTINUE\nF  FLASHLIGHT     ESC  PAUSE", controlsPanel.transform,
+            23, FontStyles.Normal, TextAlignmentOptions.Center);
+        details.color = textColor;
+        SetAnchors(details.rectTransform, new Vector2(.07f, .34f), new Vector2(.93f, .69f));
+        CreateButton("SETTINGS", controlsPanel.transform, new Vector2(.12f, .12f), new Vector2(.47f, .25f), 23)
+            .onClick.AddListener(() => { controlsPanel.SetActive(false); OpenSettings(); });
+        CreateButton("BACK", controlsPanel.transform, new Vector2(.53f, .12f), new Vector2(.88f, .25f), 23)
+            .onClick.AddListener(CloseControls);
+        controlsPanel.SetActive(false);
     }
 
     private IEnumerator FadeIn()
     {
         float time = 0f;
-        while (time < 1f)
+        while (time < menuFadeInSeconds)
         {
             time += Time.unscaledDeltaTime;
-            fadeGroup.alpha = Mathf.SmoothStep(0f, 1f, time);
+            blackCover.alpha = 1f - Mathf.SmoothStep(0f, 1f, time / menuFadeInSeconds);
             yield return null;
         }
-        fadeGroup.alpha = 1f;
+        blackCover.alpha = 0f;
     }
 
     private IEnumerator StartGame()
     {
+        if (startingGame) yield break;
+        startingGame = true;
+        if (introFade != null) StopCoroutine(introFade);
         fadeGroup.interactable = false;
         float time = 0f;
-        while (time < 0.7f)
+        float fromAlpha = blackCover.alpha;
+        while (time < playFadeOutSeconds)
         {
             time += Time.unscaledDeltaTime;
-            fadeGroup.alpha = Mathf.Lerp(1f, 0f, time / 0.7f);
+            blackCover.alpha = Mathf.Lerp(fromAlpha, 1f, Mathf.SmoothStep(0f, 1f, time / playFadeOutSeconds));
             yield return null;
         }
+        blackCover.alpha = 1f;
         SceneManager.LoadScene(gameSceneName);
     }
 
@@ -264,6 +355,43 @@ public class StartScreenUI : MonoBehaviour
         GameObject eventSystem = new GameObject("EventSystem");
         eventSystem.AddComponent<UnityEngine.EventSystems.EventSystem>();
         eventSystem.AddComponent<UnityEngine.EventSystems.StandaloneInputModule>();
+    }
+
+    private static void SetImagePixels(RectTransform rect, int left, int top, int width, int height)
+    {
+        SetAnchors(rect,
+            new Vector2(left / 1672f, 1f - (top + height) / 941f),
+            new Vector2((left + width) / 1672f, 1f - top / 941f));
+    }
+
+    private static Texture2D ExtractMenuLettering(Texture2D source, int left, int top,
+        int width, int height, float threshold, float solid)
+    {
+        Texture2D texture = new Texture2D(width, height, TextureFormat.RGBA32, false);
+        texture.filterMode = FilterMode.Point;
+        texture.wrapMode = TextureWrapMode.Clamp;
+        Color32[] pixels = new Color32[width * height];
+        if (source != null && source.isReadable)
+        {
+            Color32[] original = source.GetPixels32();
+            for (int y = 0; y < height; y++)
+                for (int x = 0; x < width; x++)
+                {
+                    // Source coordinates are measured in the original reference image.
+                    // Scale them if a platform imports the texture at a different size.
+                    int sourceX = Mathf.Clamp(Mathf.RoundToInt((left + x + .5f) * source.width / 1672f), 0, source.width - 1);
+                    int sourceY = source.height - 1 - Mathf.Clamp(
+                        Mathf.RoundToInt((top + y + .5f) * source.height / 941f), 0, source.height - 1);
+                    Color32 sample = original[sourceY * source.width + sourceX];
+                    float brightness = (sample.r + sample.g + sample.b) / 3f;
+                    byte alpha = (byte)(255f * Mathf.Clamp01((brightness - threshold) / (solid - threshold)));
+                    pixels[(height - 1 - y) * width + x] = new Color32(255, 255, 255, alpha);
+                }
+        }
+        else Debug.LogError("MainMenuReferenceTypography must be a readable texture in Resources.");
+        texture.SetPixels32(pixels);
+        texture.Apply();
+        return texture;
     }
 
     private static GameObject CreateUIObject(string objectName, Transform parent)
@@ -281,7 +409,7 @@ public class StartScreenUI : MonoBehaviour
         tmp.fontSize = size;
         tmp.fontStyle = style;
         tmp.alignment = alignment;
-        tmp.enableWordWrapping = false;
+        tmp.textWrappingMode = TextWrappingModes.NoWrap;
         return tmp;
     }
 

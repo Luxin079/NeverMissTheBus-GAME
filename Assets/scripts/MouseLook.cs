@@ -8,9 +8,15 @@ public class MouseLook : MonoBehaviour
     public Transform playerBody;
     private float xRotation = 0f;
 
+    public void SetPitch(float degrees)
+    {
+        xRotation = Mathf.Clamp(degrees, -90f, 90f);
+        transform.localRotation = Quaternion.Euler(xRotation, 0, 0);
+    }
+
     void Start()
     {
-        mouseSensitivity = PlayerPrefs.GetFloat("MouseSensitivity", mouseSensitivity);
+        mouseSensitivity = GameSaveStore.LoadSensitivity(PlayerPrefs.GetFloat("MouseSensitivity", mouseSensitivity));
         Cursor.lockState = CursorLockMode.Locked;
         Cursor.visible = false;
     }

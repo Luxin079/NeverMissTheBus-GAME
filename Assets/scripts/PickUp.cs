@@ -1,114 +1,86 @@
+using System;
+using TMPro;
 using UnityEngine;
 
 public class PickUp : MonoBehaviour
 {
     [Header("Item")]
     public string itemTag;
-
+    public bool questItem;
+    [Header("Prompt child of this pickup prefab")]
+    [Tooltip("Drag the Press E child object from THIS SAME prefab here. No second prefab needed.")]
+    public GameObject promptObject;
+    public Vector3 promptOffset = new Vector3(0, 1.1f, 0);
+    public Vector3 promptScale = Vector3.one;
+    public string promptText = "Press E to pick up";
     [Header("Audio")]
     public AudioClip pickupSound;
-    [Range(0f, 1f)] public float pickupVolume = 0.8f;
+    [Range(0, 1)] public float pickupVolume = .8f;
+    [Header("Pickup settings")]
+    [Range(.5f, 10)] public float pickupRange = 3;
 
-    [Header("Pickup Settings")]
-    [Tooltip("Maximum distance (meters) from which the player can pick up this item.")]
-    [Range(0.5f, 10f)]
-    public float pickupRange = 3f;
+    public event Action<PickUp> Collected;
+    GameObject player, prompt;
+    InventorySystem inventory;
+    PlayerAnimations animations;
+    bool playerInRange;
 
-    private bool playerInRange;
-    private GameObject player;
-    private float sqrPickupRange;
-
-    private InventorySystem inventory;
-    private PlayerAnimations animationController;
-
-    private void Awake()
+    void Awake()
     {
-        sqrPickupRange = pickupRange * pickupRange;
-
-        // Try to find player by tag once at startup. If not found we'll try again in Update.
-        player = GameObject.FindWithTag("Player");
-        if (player == null)
-            Debug.LogWarning($"{name}: No GameObject with tag 'Player' found at Awake. The pickup range will be checked each frame until a player is found.");
-    }
-
-    /// <summary>
-    /// Backwards-compatible method if other scripts call this.
-    /// </summary>
-    public void SetPlayerInRange(bool value, GameObject playerObj)
-    {
-        playerInRange = value;
-
-        if (value)
+        if (promptObject != null)
         {
-            player = playerObj;
-            inventory = player.GetComponent<InventorySystem>();
-            animationController = player.GetComponentInChildren<PlayerAnimations>();
+            prompt = promptObject;
+            prompt.transform.localPosition = promptOffset;
+            prompt.transform.localScale = promptScale;
         }
         else
         {
-            inventory = null;
-            animationController = null;
+            prompt = new GameObject("Pickup prompt");
+            prompt.transform.SetParent(transform, false);
+            prompt.transform.localPosition = promptOffset;
+            var text = prompt.AddComponent<TextMeshPro>();
+            text.text = promptText; text.fontSize = 2.2f;
+            text.alignment = TextAlignmentOptions.Center;
+            text.rectTransform.sizeDelta = new Vector2(5, 1);
+            prompt.AddComponent<YBillboard>();
         }
+        prompt.SetActive(false);
     }
 
-    private void Update()
+    public void SetPlayerInRange(bool value, GameObject playerObj)
     {
-        // If we don't have a player reference yet, try to find it.
-        if (player == null)
-            player = GameObject.FindWithTag("Player");
-
-        // If still no player, nothing to do.
-        if (player == null)
-            return;
-
-        // Update squared range in case user changes pickupRange in inspector at runtime.
-        sqrPickupRange = pickupRange * pickupRange;
-
-        // Distance check (squared for a small perf win)
-        float sqrDistance = (player.transform.position - transform.position).sqrMagnitude;
-        bool nowInRange = sqrDistance <= sqrPickupRange;
-
-        if (nowInRange && !playerInRange)
-        {
-            // Enter range
-            playerInRange = true;
-            inventory = player.GetComponent<InventorySystem>();
-            animationController = player.GetComponentInChildren<PlayerAnimations>();
-        }
-        else if (!nowInRange && playerInRange)
-        {
-            // Exit range
-            playerInRange = false;
-            inventory = null;
-            animationController = null;
-        }
-
-        if (!playerInRange)
-            return;
-
-        if (Input.GetKeyDown(KeyCode.E))
-            PickUpItem();
+        player = playerObj; playerInRange = value;
+        inventory = value && player != null ? player.GetComponent<InventorySystem>() : null;
+        animations = value && player != null ? player.GetComponentInChildren<PlayerAnimations>() : null;
     }
 
-    private void PickUpItem()
+    void Update()
     {
-        if (inventory == null)
-            return;
+        if (player == null) player = GameObject.FindWithTag("Player");
+        bool inRange = player != null && (player.transform.position - transform.position).sqrMagnitude <= pickupRange * pickupRange;
+        if (inRange != playerInRange) SetPlayerInRange(inRange, player);
+        if (prompt != null)
+        {
+            prompt.SetActive(inRange);
+            if (inRange && Camera.main != null) prompt.transform.LookAt(Camera.main.transform);
+        }
+        if (inRange && Input.GetKeyDown(KeyCode.E)) PickUpItem();
+    }
 
+    void PickUpItem()
+    {
+        if (inventory == null) return;
         SoundManager.Instance?.PlayAtPoint(pickupSound, transform.position, pickupVolume);
-
-        inventory.AddItem(itemTag);
-
-        if (animationController != null)
-            animationController.PlayPickupAnimation();
-
+        if (questItem) inventory.AddQuestItem(itemTag);
+        else inventory.AddItem(itemTag);
+        if (animations != null) animations.PlayPickupAnimation();
+        Collected?.Invoke(this);
         Destroy(gameObject);
     }
 
-    // Draw pickup range in the Scene view for easier tuning
-    private void OnDrawGizmosSelected()
+    void OnDrawGizmosSelected()
     {
-        Gizmos.color = Color.cyan;
-        Gizmos.DrawWireSphere(transform.position, pickupRange);
+        Gizmos.color = Color.cyan; Gizmos.DrawWireSphere(transform.position, pickupRange);
+        Gizmos.color = Color.yellow; Gizmos.DrawWireSphere(transform.position + promptOffset, .15f);
     }
 }

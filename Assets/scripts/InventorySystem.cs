@@ -30,6 +30,9 @@ public class InventorySystem : MonoBehaviour
     private HashSet<string> processedTags = new HashSet<string>();
 
     private int currentlyEquippedIndex = -1;
+    private readonly HashSet<string> questItems = new HashSet<string>();
+    public void AddQuestItem(string id) { questItems.Add(id); }
+    public bool HasQuestItem(string id) { return questItems.Contains(id); }
 
     void Start()
     {

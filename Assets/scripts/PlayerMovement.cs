@@ -11,13 +11,14 @@ public class PlayerMovement : MonoBehaviour
     public float jumpHeight = 1.2f;
 
     [Header("Crouch Settings")]
-    public float crouchHeight = 1.0f;
-    public float standingHeight = 2.0f;
+    public float crouchHeight = 1.45f;
+    public float standingHeight = 2.4f;
 
     [Header("Ground Detection")]
     public Transform groundCheck;
     public float groundDistance = 0.4f;
     public LayerMask groundMask;
+    [Min(1f)] public float fallRecoveryDistance = 2.5f;
 
     [Header("Audio Settings")]
     public AudioClip movementSound;
@@ -32,16 +33,55 @@ public class PlayerMovement : MonoBehaviour
     private bool isGrounded;
     private bool wasGrounded;
     private float inactiveTimer = 0f;
+    private Vector3 lastSafePosition;
+    private bool hasSafePosition;
 
-    void Start()
+    // Cutscene teleports must not carry a stored falling velocity into gameplay.
+    public void ResetMotion()
+    {
+        velocity = Vector3.zero;
+        inactiveTimer = 0f;
+        lastSafePosition = transform.position;
+        hasSafePosition = true;
+    }
+
+    void Awake()
     {
         controller = GetComponent<CharacterController>();
+    }
+
+    private bool CheckGround()
+    {
+        if (controller.isGrounded) return true;
+        float scale = Mathf.Abs(transform.lossyScale.y);
+        Vector3 feet = transform.TransformPoint(controller.center) - Vector3.up * controller.height * scale * .5f;
+        float radius = Mathf.Max(.05f, controller.radius * Mathf.Min(Mathf.Abs(transform.lossyScale.x), Mathf.Abs(transform.lossyScale.z)) * .8f);
+        float reach = .12f + Mathf.Min(groundDistance, .22f);
+        RaycastHit[] hits = Physics.SphereCastAll(feet + Vector3.up * .12f, radius, Vector3.down,
+            reach, ~0, QueryTriggerInteraction.Ignore);
+        foreach (var hit in hits)
+            if (hit.collider != null && !hit.transform.IsChildOf(transform) && hit.normal.y > .55f)
+                return true;
+        return false;
     }
 
     void Update()
     {
         wasGrounded = isGrounded;
-        isGrounded = Physics.CheckSphere(groundCheck.position, groundDistance, groundMask);
+        isGrounded = CheckGround();
+        if (isGrounded)
+        {
+            lastSafePosition = transform.position;
+            hasSafePosition = true;
+        }
+        else if (hasSafePosition && transform.position.y < lastSafePosition.y - fallRecoveryDistance)
+        {
+            controller.enabled = false;
+            transform.position = lastSafePosition + Vector3.up * .08f;
+            controller.enabled = true;
+            ResetMotion();
+            isGrounded = CheckGround();
+        }
 
         if (isGrounded && !wasGrounded && velocity.y < 0)
         {
@@ -62,8 +102,12 @@ public class PlayerMovement : MonoBehaviour
             currentSpeed = sprintSpeed;
         }
 
-        if (Input.GetKeyDown(KeyCode.C)) controller.height = crouchHeight;
-        else if (Input.GetKeyUp(KeyCode.C)) controller.height = standingHeight;
+        if (Input.GetKeyDown(KeyCode.C) || Input.GetKeyUp(KeyCode.C))
+        {
+            controller.height = Input.GetKey(KeyCode.C) ? crouchHeight : standingHeight;
+            // The capsule shrinks from the head, keeping its feet on the floor.
+            controller.center = new Vector3(controller.center.x, (controller.height - standingHeight) * .5f, controller.center.z);
+        }
 
         if (Input.GetKey(KeyCode.C)) currentSpeed = crouchSpeed;
 
@@ -101,7 +145,7 @@ public class PlayerMovement : MonoBehaviour
             SoundManager.Instance?.PlayOneShot(jumpSound);
         }
 
-        velocity.y += gravity * Time.deltaTime;
+        velocity.y = Mathf.Max(velocity.y + gravity * Time.deltaTime, -30f);
         controller.Move(velocity * Time.deltaTime);
     }
 }
