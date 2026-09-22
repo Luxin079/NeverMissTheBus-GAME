@@ -5,9 +5,11 @@ using UnityEngine;
 public partial class StoryCutsceneDirector
 {
     [Header("Sequence and pickups")]
-    public Sprite brokenGlassesSprite;
-    public GameObject glassesPickupPrefab;
-    public GameObject pickupPromptTemplate; // Legacy reference, deliberately not cloned.
+    [Tooltip("Sleep het complete brillen-GameObject uit de scene hierheen, inclusief PickUp en zijn eigen Press E-UI. Plaats het zelf op de chauffeursstoel.")]
+    public GameObject sceneGlassesPickup;
+    [HideInInspector] public Sprite brokenGlassesSprite; // Legacy serialized field.
+    [HideInInspector] public GameObject glassesPickupPrefab; // Legacy serialized field; never instantiated.
+    [HideInInspector] public GameObject pickupPromptTemplate; // Legacy serialized field; never cloned.
     public float busTravelDistance = 45;
     public float walkToBusSpeed = 3;
     public float runToBusSpeed = 5;
@@ -69,7 +71,7 @@ public partial class StoryCutsceneDirector
     [Tooltip("Off by default: leave the opening on the seated shot. Enable to play the later chapters too.")]
     public bool continueAfterSeating = true;
     [Min(0)] public float seatedShotHoldSeconds = 2;
-    public Vector3 glassesLocalPosition = new Vector3(-.31f, .14f, -.09f);
+    [HideInInspector] public Vector3 glassesLocalPosition = new Vector3(-.31f, .14f, -.09f); // Legacy placement.
     [Header("Crash investigation")]
     [Tooltip("Optional exact point in front of the empty driver's seat.")]
     public Transform driverSeatInspectionAnchor;
@@ -95,6 +97,67 @@ public partial class StoryCutsceneDirector
     Vector3 lastPlayerFollowFeet, lastFollowDirection = Vector3.forward;
     PickUp glassesPickup;
     GameObject glassesRoot;
+
+    void ResolveSceneGlasses()
+    {
+        if (sceneGlassesPickup != null && sceneGlassesPickup.scene.IsValid()) return;
+        // The BrokenGlasses tag may be on the visual child of the complete pickup.
+        foreach (var root in gameObject.scene.GetRootGameObjects())
+            foreach (var child in root.GetComponentsInChildren<Transform>(true))
+                if (child.gameObject.tag == "BrokenGlasses")
+                {
+                    var pickup = child.GetComponentInParent<PickUp>(true);
+                    sceneGlassesPickup = pickup != null ? pickup.gameObject : child.gameObject;
+                    return;
+                }
+    }
+
+    void HideSceneGlasses()
+    {
+        ResolveSceneGlasses();
+        if (sceneGlassesPickup != null && sceneGlassesPickup.scene.IsValid())
+            sceneGlassesPickup.SetActive(false);
+    }
+
+    void AttachSceneGlassesToBus()
+    {
+        ResolveSceneGlasses();
+        // Keep the scene-authored seat position while the bus drives to the stop.
+        if (sceneGlassesPickup != null && sceneGlassesPickup.scene.IsValid() && existingBus != null &&
+            (!sceneGlassesPickup.transform.IsChildOf(existingBus) ||
+             (existingDriver != null && sceneGlassesPickup.transform.IsChildOf(existingDriver.transform))))
+            sceneGlassesPickup.transform.SetParent(existingBus, true);
+    }
+
+    void ActivateSceneGlasses()
+    {
+        ResolveSceneGlasses();
+        if (sceneGlassesPickup == null || !sceneGlassesPickup.scene.IsValid())
+        {
+            Debug.LogWarning("Assign the complete glasses GameObject FROM THE SCENE (not a prefab asset) in Story Cutscene Director > Sequence and pickups.", this);
+            return;
+        }
+        if (glassesCollected) { sceneGlassesPickup.SetActive(false); return; }
+        glassesRoot = sceneGlassesPickup;
+        AttachSceneGlassesToBus();
+        glassesPickup = glassesRoot.GetComponent<PickUp>();
+        if (glassesPickup == null) glassesPickup = glassesRoot.GetComponentInChildren<PickUp>(true);
+        if (glassesPickup == null)
+        {
+            Debug.LogWarning("The scene glasses GameObject needs its existing PickUp component on itself or a child.", glassesRoot);
+            return;
+        }
+        // This prefab variant inherits the flashlight's pickup data. The glasses
+        // are a quest item, not a second flashlight inventory slot.
+        glassesPickup.questItem = true;
+        glassesPickup.itemTag = "BrokenGlasses";
+        foreach (var spinner in glassesRoot.GetComponentsInChildren<ItemSpin>(true))
+            spinner.enabled = false;
+        glassesPickup.Collected -= OnGlassesCollected;
+        glassesPickup.Collected += OnGlassesCollected;
+        glassesPickup.enabled = driverSeatFound;
+        glassesRoot.SetActive(true);
+    }
     Vector3 SchoolWalkDirection => schoolExit.TransformDirection(
         schoolWalkLocalDirection.sqrMagnitude > .001f ? schoolWalkLocalDirection.normalized : Vector3.forward);
 
@@ -448,7 +511,7 @@ public partial class StoryCutsceneDirector
             if (!friends.TryGetValue(names[i], out var friend)) continue;
             if (standingScales.TryGetValue(names[i], out var standing)) friend.localScale = standing * seatedActorScale;
             friend.position = CompanionSeatPosition(i);
-            friend.rotation = existingBus.rotation;
+            friend.rotation = SeatedActorRotation(i);
             // Correct non-foot sprite pivots, so the artwork sits above the seat surface.
             var renderer = friend.GetComponentInChildren<Renderer>();
             if (renderer != null) friend.position += Vector3.up * (CompanionSeatPosition(i).y - renderer.bounds.min.y);
@@ -546,10 +609,19 @@ public partial class StoryCutsceneDirector
             PlayAmbience(horrorAmbience);
             glassesCollected = resumeState.glassesCollected;
             driverSeatFound = resumeState.driverSeatFound;
+            ActivateSceneGlasses();
             if (glassesCollected)
             {
                 var inventory = existingPlayer.GetComponent<InventorySystem>();
-                if (inventory != null) inventory.AddQuestItem("BrokenGlasses");
+                var configuredPickup = sceneGlassesPickup != null
+                    ? sceneGlassesPickup.GetComponentInChildren<PickUp>(true) : null;
+                if (inventory != null)
+                {
+                    string itemTag = configuredPickup != null && !string.IsNullOrEmpty(configuredPickup.itemTag)
+                        ? configuredPickup.itemTag : "BrokenGlasses";
+                    if (configuredPickup == null || configuredPickup.questItem) inventory.AddQuestItem(itemTag);
+                    else inventory.AddItem(itemTag);
+                }
             }
             Vector3 savedFeet = resumeState.hasPlayerPosition
                 ? resumeState.playerPosition - Vector3.up * PlayerFeetOffset : aisleFeet;
@@ -729,6 +801,7 @@ public partial class StoryCutsceneDirector
         arrivedAtLastStop = true;
         OpeningCheckpoint = "lastStop";
         existingDriver.gameObject.SetActive(false);
+        ActivateSceneGlasses();
         StandFriendsAfterCrash();
         TeleportPlayer(existingBus.TransformPoint(new Vector3(.16f, busAisleLocal.y, 0)), -existingBus.right);
         seatedDialogueCamera = false;
@@ -747,7 +820,6 @@ public partial class StoryCutsceneDirector
         OpeningCheckpoint = "lastStop";
         if (!resumed)
             yield return SpeakScene(3);
-        if (!glassesCollected && glassesPickup == null) SpawnGlasses();
         seatedDialogueCamera = false;
         exploringFirstPerson = true;
         cinematicCamera = false;
@@ -762,9 +834,21 @@ public partial class StoryCutsceneDirector
             SetObjective("");
             yield return SpeakScene(4);
         }
-        if (glassesPickup != null) glassesPickup.enabled = true;
         if (!glassesCollected)
         {
+            if (glassesPickup == null)
+            {
+                Debug.LogError("BrokenGlasses is missing or has no PickUp component. The player cannot leave the bus until this scene pickup is assigned.", this);
+                SetObjective("BrokenGlasses ontbreekt: koppel het volledige scène-object in de Inspector.");
+                while (glassesPickup == null)
+                {
+                    ResolveSceneGlasses();
+                    if (sceneGlassesPickup != null && sceneGlassesPickup.GetComponentInChildren<PickUp>(true) != null)
+                        ActivateSceneGlasses();
+                    yield return new WaitForSeconds(.5f);
+                }
+            }
+            glassesPickup.enabled = true;
             SetObjective("Pak de bril van de chauffeur op met E.");
             while (!glassesCollected) yield return null;
         }
@@ -809,24 +893,6 @@ public partial class StoryCutsceneDirector
         Restore();
     }
 
-    void SpawnGlasses()
-    {
-        Vector3 position = existingBus.TransformPoint(glassesLocalPosition);
-        GameObject go = glassesPickupPrefab != null ? Instantiate(glassesPickupPrefab, position, existingBus.rotation) : new GameObject("Broken driver's glasses");
-        if (glassesPickupPrefab == null)
-        {
-            go.transform.position = position;
-            var visual = go.AddComponent<SpriteRenderer>(); visual.sprite = brokenGlassesSprite;
-            var collider = go.AddComponent<SphereCollider>(); collider.isTrigger = true; collider.radius = .3f;
-        }
-        spawnedVisuals.Add(go); glassesRoot = go;
-        glassesPickup = go.GetComponent<PickUp>();
-        if (glassesPickup == null) glassesPickup = go.GetComponentInChildren<PickUp>(true);
-        if (glassesPickup == null) glassesPickup = go.AddComponent<PickUp>();
-        glassesPickup.questItem = true; glassesPickup.itemTag = "BrokenGlasses";
-        glassesPickup.Collected += OnGlassesCollected;
-        glassesPickup.enabled = false;
-    }
     void OnGlassesCollected(PickUp pickup)
     {
         glassesCollected = true;

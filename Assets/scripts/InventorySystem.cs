@@ -76,6 +76,8 @@ public class InventorySystem : MonoBehaviour
         {
             if (inventoryOrder[currentlyEquippedIndex] != null)
             {
+                var flashlight = inventoryOrder[currentlyEquippedIndex].GetComponent<Flashlight>();
+                if (flashlight != null) flashlight.PlayUnequipSound();
                 inventoryOrder[currentlyEquippedIndex].SetActive(false);
             }
         }
@@ -90,6 +92,8 @@ public class InventorySystem : MonoBehaviour
             if (inventoryOrder[currentlyEquippedIndex] != null)
             {
                 inventoryOrder[currentlyEquippedIndex].SetActive(true);
+                var flashlight = inventoryOrder[currentlyEquippedIndex].GetComponent<Flashlight>();
+                if (flashlight != null) flashlight.PlayEquipSound();
             }
         }
         else

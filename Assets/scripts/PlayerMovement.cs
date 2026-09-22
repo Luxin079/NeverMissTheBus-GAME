@@ -41,8 +41,15 @@ public class PlayerMovement : MonoBehaviour
     {
         velocity = Vector3.zero;
         inactiveTimer = 0f;
+        SoundManager.Instance?.StopLoopInstant();
         lastSafePosition = transform.position;
         hasSafePosition = true;
+    }
+
+    void OnDisable()
+    {
+        inactiveTimer = 0f;
+        SoundManager.Instance?.StopLoopInstant();
     }
 
     void Awake()
@@ -114,7 +121,8 @@ public class PlayerMovement : MonoBehaviour
         Vector3 move = transform.right * x + transform.forward * z;
         controller.Move(move * currentSpeed * Time.deltaTime);
 
-        if (isGrounded && controller.velocity.magnitude > 0.1f)
+        Vector3 horizontalVelocity = Vector3.ProjectOnPlane(controller.velocity, Vector3.up);
+        if (isGrounded && move.sqrMagnitude > .01f && horizontalVelocity.sqrMagnitude > .01f)
         {
             inactiveTimer = 0f;
             float pitch = 1.0f;

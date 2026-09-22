@@ -10,7 +10,7 @@ public class StoryCutsceneDirectorEditor : Editor
     {
         DrawDefaultInspector();
         var director = (StoryCutsceneDirector)target;
-        EditorGUILayout.HelpBox("Positions: open Shots > Actor Positions for each scene. Actors > Art Prefab accepts your 2D billboard sprites. Glasses Pickup Prefab must contain both the item and its Press E prompt as ONE prefab; set PickUp > Prompt Object to that prefab's child.", MessageType.Info);
+        EditorGUILayout.HelpBox("Positions: open Shots > Actor Positions for each scene. Actors > Art Prefab accepts your 2D billboard sprites. Drag the complete glasses object FROM THE SCENE into Scene Glasses Pickup. Place it on the driver's seat; its PickUp and Press E child UI stay part of that one object. It appears only after the crash.", MessageType.Info);
         if (!Application.isPlaying && GUILayout.Button("Refresh dialogue from story text"))
         {
             Undo.RecordObject(director,"Refresh story dialogue");

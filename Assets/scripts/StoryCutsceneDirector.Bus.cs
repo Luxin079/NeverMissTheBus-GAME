@@ -18,6 +18,13 @@ public partial class StoryCutsceneDirector
         new Vector3(.23f,.11f,0),
         new Vector3(.23f,.11f,.08f)
     };
+    [Header("Seated boy positions")]
+    [Tooltip("Empty GameObject at Ethan/the Player's seat. This point is the seat surface; make it a child of the bus for easy editing.")]
+    public Transform ethanSeatAnchor;
+    [Tooltip("Empty GameObject at Lucas's seat.")]
+    public Transform lucasSeatAnchor;
+    [Tooltip("Empty GameObject at Noah's seat.")]
+    public Transform noahSeatAnchor;
     [Tooltip("Player reaches this fraction of the aisle before the seating fade.")]
     [Range(.1f,.9f)] public float aisleMidpoint=.5f;
     [Tooltip("Player root height above the bus floor after the seating fade.")]
@@ -40,6 +47,7 @@ public partial class StoryCutsceneDirector
     public float parkingShiftAlongBus = -6.5f;
 
     PlayerMovement playerMovement;
+    PlayerCrosshair playerCrosshair;
     MouseLook playerLook;
     CharacterController playerController;
     bool controllerInitiallyEnabled, busReady, driverInitiallyActive, hasSatDown, arrivedAtLastStop;
@@ -69,6 +77,7 @@ public partial class StoryCutsceneDirector
         { var found=FindFirstObjectByType<PlayerMovement>();if(found!=null)existingPlayer=found.transform; }
         if(existingBus==null || existingPlayer==null || existingDriver==null)return;
         playerMovement=existingPlayer.GetComponent<PlayerMovement>();
+        playerCrosshair=existingPlayer.GetComponent<PlayerCrosshair>();
         playerLook=existingPlayer.GetComponentInChildren<MouseLook>();
         playerController=existingPlayer.GetComponent<CharacterController>();
         if(playerMovement==null || playerLook==null || playerController==null)return;
@@ -82,6 +91,9 @@ public partial class StoryCutsceneDirector
         driverStartPosition=existingDriver.transform.position;driverStartRotation=existingDriver.transform.rotation;
         driverStartParent=existingDriver.transform.parent;
         existingDriver.transform.SetParent(existingBus,true);
+        foreach (var seatAnchor in new[] { ethanSeatAnchor, lucasSeatAnchor, noahSeatAnchor })
+            if (seatAnchor != null && !seatAnchor.IsChildOf(existingBus))
+                seatAnchor.SetParent(existingBus, true);
         playerStartLayer=existingPlayer.gameObject.layer;
         playerCameraStartLocal=gameCamera.transform.localPosition;
         playerCameraStartNearClip=gameCamera.nearClipPlane;
@@ -162,6 +174,7 @@ public partial class StoryCutsceneDirector
     }
     void SetPlayerControl(bool enabled)
     {
+        playerCrosshair?.SetStoryControl(enabled);
         if(playerMovement==null || playerLook==null)return;
         playerMovement.ResetMotion();
         playerMovement.enabled=enabled && suspended.Contains(playerMovement);
@@ -183,10 +196,21 @@ public partial class StoryCutsceneDirector
     }
     Vector3 BackSeatFeet(int index)
     {
+        Transform anchor = SeatAnchor(index);
+        if (anchor != null) return anchor.position;
         Vector3 offset=seatedCharacterLocals!=null && index>=0 && index<seatedCharacterLocals.Length
             ?seatedCharacterLocals[index]
             :busSeatLocal+new Vector3(0,0,(index-1)*.08f);
         return existingBus.TransformPoint(offset);
+    }
+    Transform SeatAnchor(int index)
+    {
+        return index == 0 ? ethanSeatAnchor : index == 1 ? lucasSeatAnchor : index == 2 ? noahSeatAnchor : null;
+    }
+    Quaternion SeatedActorRotation(int index)
+    {
+        Transform anchor = SeatAnchor(index);
+        return anchor != null ? anchor.rotation : existingBus.rotation;
     }
     Vector3 CompanionSeatPosition(int index)
     {

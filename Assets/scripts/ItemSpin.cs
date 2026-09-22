@@ -13,14 +13,12 @@ public class ItemSpin : MonoBehaviour
     public float bobSpeed = 2f;
     public float bobHeight = 0.25f;
 
-    [Header("Light Settings")]
-    public bool enableLightPulse = true;
-    public float minLightIntensity = 1f;
-    public float maxLightIntensity = 3f;
-    public float lightPulseSpeed = 2f;
+    [HideInInspector] public bool enableLightPulse = true; // Legacy prefab settings; pickups no longer generate lights.
+    [HideInInspector] public float minLightIntensity = 1f;
+    [HideInInspector] public float maxLightIntensity = 3f;
+    [HideInInspector] public float lightPulseSpeed = 2f;
 
     private Vector3 startPos;
-    private Light itemLight;
 
     void Start()
     {
@@ -29,15 +27,6 @@ public class ItemSpin : MonoBehaviour
         if (objectToSpin == null)
             objectToSpin = transform;
 
-        itemLight = GetComponentInChildren<Light>();
-
-        if (itemLight == null)
-        {
-            itemLight = gameObject.AddComponent<Light>();
-            itemLight.type = LightType.Point;
-            itemLight.range = 3f;
-            itemLight.color = new Color(1f, 0.8f, 0.2f);
-        }
     }
 
     void Update()
@@ -49,11 +38,5 @@ public class ItemSpin : MonoBehaviour
         float newY = startPos.y + Mathf.Sin(Time.time * bobSpeed) * bobHeight;
         transform.position = new Vector3(transform.position.x, newY, transform.position.z);
 
-        // Pulse the light
-        if (enableLightPulse && itemLight != null)
-        {
-            float pulse = Mathf.PingPong(Time.time * lightPulseSpeed, 1f);
-            itemLight.intensity = Mathf.Lerp(minLightIntensity, maxLightIntensity, pulse);
-        }
     }
 }

@@ -45,16 +45,16 @@ public class Flashlight : MonoBehaviour
     {
         ConfigureBeam();
         if (spotlight != null) spotlight.enabled = lightWasOn;
-        // Speelt af wanneer de zaklamp actief wordt
-        SoundManager.Instance?.PlayOneShot(equipSound);
     }
 
     private void OnDisable()
     {
         if (spotlight != null) { lightWasOn = spotlight.enabled; spotlight.enabled = false; }
-        // Speelt af wanneer de zaklamp wordt weggestopt
-        SoundManager.Instance?.PlayOneShot(unequipSound);
     }
+
+    // Called by the inventory only for a deliberate slot change, not scene startup.
+    public void PlayEquipSound() => SoundManager.Instance?.PlayOneShot(equipSound);
+    public void PlayUnequipSound() => SoundManager.Instance?.PlayOneShot(unequipSound);
 
     private void Update()
     {

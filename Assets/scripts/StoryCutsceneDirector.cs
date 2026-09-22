@@ -91,6 +91,8 @@ public partial class StoryCutsceneDirector : MonoBehaviour
     public Vector3 schoolWalkLocalDirection = Vector3.forward;
     [Min(0)] public float actorGroundClearance = .03f;
     public bool IsPlaying { get; private set; }
+    public bool IsDialogueLinePlaying { get; private set; }
+    public bool IsScreenFaded => fade != null && fade.alpha > .02f;
     public int CurrentScene { get; private set; }
     public string OpeningCheckpoint { get; private set; } = "school";
     GameSaveState resumeState;
@@ -108,6 +110,7 @@ public partial class StoryCutsceneDirector : MonoBehaviour
 
     void Awake()
     {
+        HideSceneGlasses();
         if (GetComponent<GamePauseMenu>() == null) gameObject.AddComponent<GamePauseMenu>();
         // Cover the first rendered frame; Start waits one frame for scene references.
         BuildUI();
@@ -137,14 +140,17 @@ public partial class StoryCutsceneDirector : MonoBehaviour
         if (IsPlaying || canvas == null) return;
         gameCamera=Camera.main;
         if (gameCamera == null) { Debug.LogError("Story requires the Player Main Camera.",this); return; }
+        HideSceneGlasses();
         PrepareBusSequence();
         if (!BusReady || schoolExit == null) { Debug.LogError("Assign the school entrance, Player, bus and driver in the Inspector.",this); return; }
+        AttachSceneGlassesToBus();
+        playerCrosshair?.SetStoryControl(false);
         oldLock=Cursor.lockState; oldCursor=Cursor.visible;
         foreach (var b in FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None))
             if (b.enabled && (b is PlayerMovement || b is MouseLook || b is InventorySystem || b is PickUp || b is Flashlight || b is DialogueManager))
             { suspended.Add(b); b.enabled=false; }
         foreach (var c in FindObjectsByType<Canvas>(FindObjectsSortMode.None))
-            if (c != canvas && c.renderMode != RenderMode.WorldSpace &&
+            if (c != canvas && c != playerCrosshair?.CrosshairCanvas && c.renderMode != RenderMode.WorldSpace &&
                 c.GetComponentInParent<GamePauseMenu>() == null && c.gameObject.activeSelf)
             { hidden.Add(c.gameObject); c.gameObject.SetActive(false); }
         var cameraObject=new GameObject("Story Camera"); cameraObject.transform.SetParent(transform);
@@ -177,9 +183,11 @@ public partial class StoryCutsceneDirector : MonoBehaviour
     {
         if (!IsPlaying) return;
         IsPlaying=false;
+        IsDialogueLinePlaying=false;
         CleanupFirstPerson();
         RestoreBusSequence();
         foreach (var b in suspended) if (b!=null) b.enabled=true;
+        playerCrosshair?.SetStoryControl(true);
         suspended.Clear();
         foreach (var g in hidden) if(g!=null) g.SetActive(true);
         hidden.Clear();
@@ -251,6 +259,7 @@ public partial class StoryCutsceneDirector : MonoBehaviour
     }
     IEnumerator Say(string who,string words,bool focusSpeaker=true)
     {
+        IsDialogueLinePlaying=true;
         subtitle.transform.parent.gameObject.SetActive(true);
         subtitle.text=DisplayName(ActorRole(who))+": "+words; subtitle.maxVisibleCharacters=0; subtitle.ForceMeshUpdate(); hint.text="";
         if (focusSpeaker) FocusSpeaker(who);
@@ -262,6 +271,7 @@ public partial class StoryCutsceneDirector : MonoBehaviour
         while(!advance) yield return null;
         advance=false; hint.text="";
         if(dialogueAudio!=null && advanceBlip!=null) dialogueAudio.PlayOneShot(advanceBlip,.25f);
+        IsDialogueLinePlaying=false;
     }
     IEnumerator SpeakScene(int index)
     {
