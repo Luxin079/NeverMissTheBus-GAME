@@ -31,7 +31,7 @@ Een first-person horrorgame waarin drie vrienden na school de bus missen. Ze nem
 
 *Character-sheet, geen gameplay-screenshot. De sprites zijn met AI-beeldgeneratie gemaakt op basis van aangeleverde referenties en vervolgens in Unity geïntegreerd. De winterkleding, pixelstijl en gedempte kleuren ondersteunen de koude horrorsfeer.*
 
-![Aanvullende achteraanzichten en zitposes](Assets/Resources/Characters/WinterBoysPoses.png)
+
 
 *Iteratiesheet: achteraanzichten worden gebruikt bij weglopen tijdens gameplay. De zittende varianten op de onderste rij zijn na feedback uitgeschakeld. De game gebruikt kleurcorrectie voor de achteraanzichten; deze bronafbeelding toont die shadercorrectie niet.*
 
