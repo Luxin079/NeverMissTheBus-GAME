@@ -25,10 +25,11 @@ public partial class StoryCutsceneDirector
     public Transform lucasSeatAnchor;
     [Tooltip("Empty GameObject at Noah's seat.")]
     public Transform noahSeatAnchor;
-    [Tooltip("Player reaches this fraction of the aisle before the seating fade.")]
-    [Range(.1f,.9f)] public float aisleMidpoint=.5f;
-    [Tooltip("Player root height above the bus floor after the seating fade.")]
-    public float seatedPlayerHeight=0;
+    [HideInInspector] public float aisleMidpoint=.5f;
+    [HideInInspector] public Transform seatingTransitionPoint;
+    [HideInInspector] public float seatingTransitionRadius=.8f;
+    [Tooltip("Start the seating fade when the Player is inside the bus and this close to either friend, in world metres.")]
+    [Min(.3f)] public float sitNearFriendsDistance = 1.5f;
     [Tooltip("Visual origin height above a bus seat. Raise this when a sprite sinks into the floor.")]
     public float companionSeatHeight=0;
     [Tooltip("Bus layer when the player boards. Unity layer 1 is TransparentFX.")]
@@ -37,8 +38,6 @@ public partial class StoryCutsceneDirector
     public float storyWalkSpeed=3; // Serialized legacy setting.
     [Tooltip("Optional exact bus stopping point in front of the shelter. An empty Transform in the scene works well.")]
     public Transform busStopParkingAnchor;
-    [Tooltip("Eye height above the ground for the existing Player camera during first-person play.")]
-    [Min(.5f)] public float firstPersonEyeHeight=1.12f;
     [Header("Bus interior collision (local prefab units)")]
     [Min(.2f)] public float busInteriorFloorLength=.86f;
     [Min(.12f)] public float busInteriorFloorWidth=.28f;
@@ -58,7 +57,6 @@ public partial class StoryCutsceneDirector
     Vector3 playableCameraLocal;
     float playerCameraStartNearClip;
     int playerStartLayer;
-    readonly List<Renderer> hiddenPlayerRenderers=new List<Renderer>();
     readonly Dictionary<Renderer,bool> lastBusRendererStates=new Dictionary<Renderer,bool>();
     readonly List<Transform> busDoors=new List<Transform>();
     readonly List<Vector3> doorStartPositions=new List<Vector3>();
@@ -91,18 +89,13 @@ public partial class StoryCutsceneDirector
         driverStartPosition=existingDriver.transform.position;driverStartRotation=existingDriver.transform.rotation;
         driverStartParent=existingDriver.transform.parent;
         existingDriver.transform.SetParent(existingBus,true);
-        foreach (var seatAnchor in new[] { ethanSeatAnchor, lucasSeatAnchor, noahSeatAnchor })
+        foreach (var seatAnchor in new[] { ethanSeatAnchor, lucasSeatAnchor, noahSeatAnchor, seatingTransitionPoint })
             if (seatAnchor != null && !seatAnchor.IsChildOf(existingBus))
                 seatAnchor.SetParent(existingBus, true);
         playerStartLayer=existingPlayer.gameObject.layer;
         playerCameraStartLocal=gameCamera.transform.localPosition;
         playerCameraStartNearClip=gameCamera.nearClipPlane;
-        float scaleY=Mathf.Max(.01f,Mathf.Abs(existingPlayer.lossyScale.y));
-        Vector3 eyeLocal=playerCameraStartLocal;
-        eyeLocal.y=(firstPersonEyeHeight-PlayerFeetOffset)/scaleY;
-        gameCamera.transform.localPosition=eyeLocal;
-        playableCameraLocal=eyeLocal;
-        gameCamera.nearClipPlane=.08f;
+        playableCameraLocal=playerCameraStartLocal;
         Bounds doorBounds=default; bool foundDoor=false;
         foreach(var child in existingBus.GetComponentsInChildren<Transform>(true))
         {
@@ -113,6 +106,7 @@ public partial class StoryCutsceneDirector
             foreach(var collider in child.GetComponentsInChildren<Collider>())
             {doorColliders.Add(collider);doorColliderStates.Add(collider.enabled);}
         }
+        AttachDoorGlass();
         aisleFeet=existingBus.TransformPoint(busAisleLocal);
         seatFeet=existingBus.TransformPoint(busSeatLocal);
         doorThreshold=foundDoor?doorBounds.center:existingBus.TransformPoint(new Vector3(-.33f,.075f,.13f));
@@ -126,8 +120,6 @@ public partial class StoryCutsceneDirector
         Vector3 parkingDelta=parkedBusPosition-initialBusPosition;
         doorOutside+=parkingDelta;doorThreshold+=parkingDelta;
         aisleFeet+=parkingDelta;seatFeet+=parkingDelta;
-        foreach(var renderer in existingPlayer.GetComponents<Renderer>())
-            if(renderer.enabled){hiddenPlayerRenderers.Add(renderer);renderer.enabled=false;}
         BuildBusInteriorCollision();
         busReady=true;
     }
@@ -177,8 +169,16 @@ public partial class StoryCutsceneDirector
         playerCrosshair?.SetStoryControl(enabled);
         if(playerMovement==null || playerLook==null)return;
         playerMovement.ResetMotion();
+        if (enabled && !playerLook.enabled && gameCamera != null)
+        {
+            Vector3 view = gameCamera.transform.eulerAngles;
+            existingPlayer.rotation = Quaternion.Euler(0,view.y,0);
+            playerLook.SetPitch(Mathf.DeltaAngle(0,view.x));
+        }
         playerMovement.enabled=enabled && suspended.Contains(playerMovement);
         playerLook.enabled=enabled && suspended.Contains(playerLook);
+        var inventory = existingPlayer.GetComponent<InventorySystem>();
+        if (inventory != null && suspended.Contains(inventory)) inventory.enabled = enabled;
         if(friends.TryGetValue("Ethan",out var ethan) && ethan!=null)
             ethan.gameObject.SetActive(!enabled && !boardingFirstPerson && !seatedDialogueCamera && !exploringFirstPerson);
         Cursor.lockState=enabled?CursorLockMode.Locked:CursorLockMode.None;
@@ -193,6 +193,40 @@ public partial class StoryCutsceneDirector
         playerMovement.ResetMotion();playerLook.SetPitch(0);
         playerController.enabled=controllerInitiallyEnabled;
         Physics.SyncTransforms();
+    }
+
+    bool TryStandInBusAisle()
+    {
+        // Return to the proven walkable position recorded just before sitting.
+        // Imported bus colliders can report broad overlaps even inside the aisle.
+        if (lastWalkableBusLocal.HasValue && postCrashStandPoint == null)
+        {
+            TeleportPlayer(existingBus.TransformPoint(lastWalkableBusLocal.Value) + Vector3.up * .03f, -existingBus.right);
+            return true;
+        }
+        float radius = playerController.radius * Mathf.Max(Mathf.Abs(existingPlayer.lossyScale.x), Mathf.Abs(existingPlayer.lossyScale.z));
+        float height = Mathf.Max(radius * 2, playerController.height * Mathf.Abs(existingPlayer.lossyScale.y));
+        Vector3 baseFeet = postCrashStandPoint != null ? postCrashStandPoint.position : existingBus.TransformPoint(busAisleLocal);
+        Physics.SyncTransforms();
+        for (int i = 0; i < 21; i++)
+        {
+            float offset = i == 0 ? 0 : ((i+1)/2) * .25f * (i%2 == 0 ? -1 : 1);
+            Vector3 feet = baseFeet + existingBus.right * offset + Vector3.up * .04f;
+            bool blocked = false;
+            foreach (var hit in Physics.OverlapCapsule(feet + Vector3.up * radius,
+                feet + Vector3.up * (height-radius), radius * .95f, ~0, QueryTriggerInteraction.Ignore))
+                if (!hit.transform.IsChildOf(existingPlayer)) { blocked = true; break; }
+            // Ignore the player's own collider and accept any bus floor hit,
+            // not only the first overlapping collider returned by a raycast.
+            bool supported = false;
+            foreach (var ground in Physics.RaycastAll(feet + Vector3.up * .15f, Vector3.down, .4f, ~0, QueryTriggerInteraction.Ignore))
+                if (ground.transform.IsChildOf(existingBus) && !ground.transform.IsChildOf(existingPlayer) && ground.normal.y > .5f)
+                    supported = true;
+            if (blocked || !supported) continue;
+            TeleportPlayer(feet, -existingBus.right);
+            return true;
+        }
+        return false;
     }
     Vector3 BackSeatFeet(int index)
     {
@@ -223,6 +257,79 @@ public partial class StoryCutsceneDirector
         foreach(var collider in doorColliders)if(collider!=null)collider.enabled=false;
         for(float t=0;t<1;t+=Time.unscaledDeltaTime*2)
         {for(int i=0;i<busDoors.Count;i++)if(busDoors[i]!=null)busDoors[i].localPosition=doorStartPositions[i]+Vector3.right*(i==0?-.07f:.07f)*Mathf.SmoothStep(0,1,t);yield return null;}
+        for(int i=0;i<busDoors.Count;i++)if(busDoors[i]!=null)busDoors[i].localPosition=doorStartPositions[i]+Vector3.right*(i==0?-.07f:.07f);
+    }
+
+    readonly Dictionary<MeshFilter, Mesh> originalGlassMeshes = new Dictionary<MeshFilter, Mesh>();
+    readonly List<Mesh> generatedGlassMeshes = new List<Mesh>();
+    readonly List<GameObject> movingDoorGlass = new List<GameObject>();
+    readonly Dictionary<Transform, Vector3> wheelStartPositions = new Dictionary<Transform, Vector3>();
+    readonly Dictionary<Transform, Quaternion> wheelStartRotations = new Dictionary<Transform, Quaternion>();
+
+    void AttachDoorGlass()
+    {
+        // Imported glass can contain every window in one mesh. Move only the
+        // triangles inside each door, never the windshield or side windows.
+        foreach (var filter in existingBus.GetComponentsInChildren<MeshFilter>(true))
+        {
+            if (!filter.name.ToLowerInvariant().Contains("glass") || filter.sharedMesh == null) continue;
+            if (busDoors.Exists(door => filter.transform.IsChildOf(door))) continue;
+            Mesh source = filter.sharedMesh;
+            if (!source.isReadable) { Debug.LogWarning("Enable Read/Write for bus glass: " + filter.name, filter); continue; }
+            var vertices = source.vertices;
+            Mesh remaining = Instantiate(source);
+            bool changed = false;
+            for (int d = 0; d < busDoors.Count; d++)
+            {
+                var doorRenderer = busDoors[d].GetComponent<Renderer>();
+                if (doorRenderer == null) continue;
+                Bounds bounds = doorRenderer.bounds;
+                bounds.Expand(.06f);
+                Mesh pane = Instantiate(source);
+                bool hasPane = false;
+                for (int sub = 0; sub < source.subMeshCount; sub++)
+                {
+                    var keep = new List<int>(); var move = new List<int>();
+                    var indices = remaining.GetTriangles(sub);
+                    for (int t = 0; t < indices.Length; t += 3)
+                    {
+                        Vector3 center = filter.transform.TransformPoint((vertices[indices[t]] + vertices[indices[t+1]] + vertices[indices[t+2]]) / 3f);
+                        var destination = bounds.Contains(center) ? move : keep;
+                        destination.Add(indices[t]); destination.Add(indices[t+1]); destination.Add(indices[t+2]);
+                    }
+                    pane.SetTriangles(move, sub); remaining.SetTriangles(keep, sub);
+                    hasPane |= move.Count > 0;
+                }
+                if (!hasPane) { Destroy(pane); continue; }
+                changed = true;
+                var part = new GameObject("Moving door glass");
+                part.layer = filter.gameObject.layer;
+                part.transform.SetParent(filter.transform, false);
+                part.transform.SetParent(busDoors[d], true);
+                part.AddComponent<MeshFilter>().sharedMesh = pane;
+                part.AddComponent<MeshRenderer>().sharedMaterials = filter.GetComponent<Renderer>().sharedMaterials;
+                movingDoorGlass.Add(part); generatedGlassMeshes.Add(pane);
+            }
+            if (changed) { originalGlassMeshes.Add(filter, source); filter.sharedMesh = remaining; generatedGlassMeshes.Add(remaining); }
+            else Destroy(remaining);
+        }
+    }
+
+    void RollBusWheels(Transform bus, Vector3 displacement)
+    {
+        foreach (var wheel in bus.GetComponentsInChildren<MeshRenderer>(true))
+        {
+            if (!wheel.name.Contains("tire")) continue;
+            if (!wheelStartPositions.ContainsKey(wheel.transform))
+            {
+                wheelStartPositions.Add(wheel.transform, wheel.transform.localPosition);
+                wheelStartRotations.Add(wheel.transform, wheel.transform.localRotation);
+            }
+            float radius = Mathf.Max(.05f, wheel.bounds.extents.y);
+            Vector3 axle = bus.forward;
+            float distance = Vector3.Dot(displacement, Vector3.Cross(axle, Vector3.up));
+            wheel.transform.RotateAround(wheel.bounds.center, axle, distance / radius * Mathf.Rad2Deg);
+        }
     }
     void BuildBoardingRamp()
     {
@@ -239,6 +346,15 @@ public partial class StoryCutsceneDirector
         ShowLastBus();
         if(!busReady)return;
         busReady=false;
+        investigationLookLocked = false;
+        investigationLookAtGlasses = false;
+        foreach (var pair in wheelStartPositions)
+            if (pair.Key != null) { pair.Key.localPosition = pair.Value; pair.Key.localRotation = wheelStartRotations[pair.Key]; }
+        wheelStartPositions.Clear(); wheelStartRotations.Clear();
+        foreach (var pair in originalGlassMeshes) if (pair.Key != null) pair.Key.sharedMesh = pair.Value;
+        foreach (var part in movingDoorGlass) if (part != null) Destroy(part);
+        foreach (var mesh in generatedGlassMeshes) Destroy(mesh);
+        originalGlassMeshes.Clear(); movingDoorGlass.Clear(); generatedGlassMeshes.Clear();
         if(existingBus!=null && !arrivedAtLastStop)existingBus.position=initialBusPosition;
         if(existingBus!=null && existingPlayer!=null && playerController!=null && hasSatDown && !arrivedAtLastStop)
             TeleportPlayer(existingBus.TransformPoint(busAisleLocal),existingBus.right);
@@ -254,8 +370,6 @@ public partial class StoryCutsceneDirector
         if(existingDriver!=null)existingDriver.transform.SetParent(driverStartParent,true);
         if(existingDriver!=null && !arrivedAtLastStop)
         {existingDriver.transform.SetPositionAndRotation(driverStartPosition,driverStartRotation);existingDriver.gameObject.SetActive(driverInitiallyActive);}
-        foreach(var renderer in hiddenPlayerRenderers)if(renderer!=null)renderer.enabled=true;
-        hiddenPlayerRenderers.Clear();
     }
     void HideLastBus()
     {
@@ -277,6 +391,9 @@ public partial class StoryCutsceneDirector
         if(existingBus==null)return;
         Gizmos.color=Color.green;Gizmos.DrawWireSphere(existingBus.TransformPoint(busSeatLocal),.3f);
         Gizmos.color=Color.cyan;Gizmos.DrawWireSphere(existingBus.TransformPoint(busAisleLocal),.25f);
+        Gizmos.color = Color.magenta;
+        Gizmos.DrawWireSphere(BackSeatFeet(1), sitNearFriendsDistance);
+        Gizmos.DrawWireSphere(BackSeatFeet(2), sitNearFriendsDistance);
         Gizmos.color=Color.yellow;
         Gizmos.DrawWireSphere(driverSeatInspectionAnchor!=null ? driverSeatInspectionAnchor.position
             : existingBus.TransformPoint(driverSeatInspectionLocal),driverSeatInspectionRadius);

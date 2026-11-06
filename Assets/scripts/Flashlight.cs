@@ -8,6 +8,11 @@ public class Flashlight : MonoBehaviour
     public float beamRange = 22f;
     public float beamIntensity = 12f;
     private bool lightWasOn;
+    public void ResetUnequipped()
+    {
+        lightWasOn = false;
+        if (spotlight != null) spotlight.enabled = false;
+    }
 
     private void ConfigureBeam()
     {
@@ -58,6 +63,8 @@ public class Flashlight : MonoBehaviour
 
     private void Update()
     {
+        var movement = GetComponentInParent<PlayerMovement>();
+        if (Time.timeScale <= 0 || (movement != null && !movement.isActiveAndEnabled)) return;
         if (Input.GetKeyDown(toggleKey))
         {
             if (spotlight != null)

@@ -159,19 +159,28 @@ public class GamePauseMenu : MonoBehaviour
         rect.anchorMin = min; rect.anchorMax = max; rect.offsetMin = rect.offsetMax = Vector2.zero;
         return rect;
     }
-    static TMP_Text Text(string value, Transform parent, Vector2 min, Vector2 max, float size)
+    public TMP_FontAsset menuFont;
+    TMP_Text Text(string value, Transform parent, Vector2 min, Vector2 max, float size)
     {
         var text = Rect(value, parent, min, max).gameObject.AddComponent<TextMeshProUGUI>();
+        text.font = menuFont != null ? menuFont : Resources.Load<TMP_FontAsset>("Fonts & Materials/Electronic Highway Sign SDF");
         text.text = value; text.fontSize = size; text.alignment = TextAlignmentOptions.Center;
-        text.color = new Color(.87f, .86f, .78f); text.raycastTarget = false;
+        text.color = new Color(.92f, .93f, .91f); text.raycastTarget = false;
+        text.enableAutoSizing = true; text.fontSizeMin = 12; text.fontSizeMax = size;
         return text;
     }
-    static void Button(string value, Transform parent, Vector2 min, Vector2 max, UnityEngine.Events.UnityAction action)
+    void Button(string value, Transform parent, Vector2 min, Vector2 max, UnityEngine.Events.UnityAction action)
     {
         var rect = Rect(value, parent, min, max);
-        var image = rect.gameObject.AddComponent<Image>(); image.color = new Color(.15f, .16f, .16f, .88f);
+        var image = rect.gameObject.AddComponent<Image>(); image.color = new Color(.04f, .045f, .04f, .9f);
         var button = rect.gameObject.AddComponent<Button>(); button.targetGraphic = image; button.onClick.AddListener(action);
-        Text(value, rect, Vector2.zero, Vector2.one, 29);
+        var label = Text(value, rect, Vector2.zero, Vector2.one, 29);
+        button.targetGraphic = label;
+        var colors = button.colors;
+        colors.normalColor = new Color(.48f, .49f, .48f);
+        colors.highlightedColor = colors.selectedColor = Color.white;
+        colors.pressedColor = new Color(.7f, .7f, .7f);
+        button.colors = colors;
     }
     static void EnsureEventSystem()
     {

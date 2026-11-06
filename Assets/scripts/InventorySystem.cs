@@ -31,11 +31,21 @@ public class InventorySystem : MonoBehaviour
 
     private int currentlyEquippedIndex = -1;
     private readonly HashSet<string> questItems = new HashSet<string>();
-    public void AddQuestItem(string id) { questItems.Add(id); }
+    public void AddQuestItem(string id)
+    {
+        questItems.Add(id);
+        // Quest progress and an equippable item are not mutually exclusive.
+        // Quest-only items without a hand model remain valid, too.
+        if (itemMappings.Exists(mapping => mapping.itemTag == id && mapping.firstPersonObject != null))
+            AddItem(id);
+    }
     public bool HasQuestItem(string id) { return questItems.Contains(id); }
 
-    void Start()
+    void Awake()
     {
+        // A beam can be a sibling of its held item and survive SetActive(false).
+        foreach (var flashlight in GetComponentsInChildren<Flashlight>(true))
+            flashlight.ResetUnequipped();
         // Hide all first-person object visuals initially
         foreach (var mapping in itemMappings)
         {
@@ -48,6 +58,8 @@ public class InventorySystem : MonoBehaviour
 
     void Update()
     {
+        var movement = GetComponent<PlayerMovement>();
+        if (Time.timeScale <= 0 || (movement != null && !movement.isActiveAndEnabled)) return;
         // Cycle through keyboard numbers 1 through 9 (KeyCode.Alpha1 to Alpha9)
         for (int i = 0; i < 9; i++)
         {
@@ -105,11 +117,12 @@ public class InventorySystem : MonoBehaviour
     // Called by the PickUp script when the player touches the 3D item
     public void AddItem(string itemTag)
     {
+        if (processedTags.Contains(itemTag)) return;
         bool itemFound = false;
 
         foreach (var mapping in itemMappings)
         {
-            if (mapping.itemTag == itemTag && !processedTags.Contains(itemTag))
+            if (mapping.itemTag == itemTag && mapping.firstPersonObject != null)
             {
                 processedTags.Add(itemTag);
                 inventoryOrder.Add(mapping.firstPersonObject);
@@ -122,7 +135,7 @@ public class InventorySystem : MonoBehaviour
 
         if (!itemFound)
         {
-            Debug.LogError($"FAILED: Could not find item mapping for tag '{itemTag}'");
+            Debug.LogError($"FAILED: No item mapping with a first-person object for tag '{itemTag}'", this);
         }
     }
 }

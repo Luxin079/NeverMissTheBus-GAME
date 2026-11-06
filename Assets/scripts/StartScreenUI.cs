@@ -19,6 +19,11 @@ public class StartScreenUI : MonoBehaviour
     private CanvasGroup blackCover;
     private Coroutine introFade;
     private bool startingGame;
+    [Header("Original menu soundtrack")]
+    public AudioClip menuMusic;
+    [Range(0, 1)] public float menuMusicVolume = .22f;
+    private AudioSource menuMusicSource;
+    private AudioClip generatedMenuMusic;
     private readonly List<Texture2D> menuGlyphTextures = new List<Texture2D>();
     private RawImage[] buttons;
     private RectTransform highlightRect;
@@ -46,16 +51,25 @@ public class StartScreenUI : MonoBehaviour
         menuCamera.cullingMask = 0;
         EnsureEventSystem();
         BuildMenu();
+        menuMusicSource = gameObject.AddComponent<AudioSource>();
+        menuMusicSource.playOnAwake = false; menuMusicSource.loop = true;
+        menuMusicSource.spatialBlend = 0; menuMusicSource.volume = menuMusicVolume;
+        if (menuMusic == null) generatedMenuMusic = OriginalAmbientScore.Create(true);
+        menuMusicSource.clip = menuMusic != null ? menuMusic : generatedMenuMusic;
+        menuMusicSource.Play();
     }
 
     private void OnDestroy()
     {
+        if (generatedMenuMusic != null) Destroy(generatedMenuMusic);
         foreach (Texture2D texture in menuGlyphTextures)
             if (texture != null) Destroy(texture);
     }
 
     private void Update()
     {
+        if (menuMusicSource != null) menuMusicSource.volume = Mathf.MoveTowards(menuMusicSource.volume,
+            startingGame ? 0 : menuMusicVolume, Time.unscaledDeltaTime * .2f);
         if (startingGame) return;
         if (settingsOpen)
         {
@@ -401,10 +415,12 @@ public class StartScreenUI : MonoBehaviour
         return obj;
     }
 
-    private static TextMeshProUGUI CreateText(string text, Transform parent, float size, FontStyles style, TextAlignmentOptions alignment)
+    public TMP_FontAsset menuFont;
+    private TextMeshProUGUI CreateText(string text, Transform parent, float size, FontStyles style, TextAlignmentOptions alignment)
     {
         GameObject obj = CreateUIObject(text, parent);
         TextMeshProUGUI tmp = obj.AddComponent<TextMeshProUGUI>();
+        tmp.font = menuFont != null ? menuFont : Resources.Load<TMP_FontAsset>("Fonts & Materials/Electronic Highway Sign SDF");
         tmp.text = text;
         tmp.fontSize = size;
         tmp.fontStyle = style;

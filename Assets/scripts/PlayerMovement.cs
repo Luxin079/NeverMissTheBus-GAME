@@ -10,9 +10,9 @@ public class PlayerMovement : MonoBehaviour
     public float gravity = -9.81f;
     public float jumpHeight = 1.2f;
 
-    [Header("Crouch Settings")]
-    public float crouchHeight = 1.45f;
-    public float standingHeight = 2.4f;
+    [Header("Crouch")]
+    [Tooltip("Fraction of the scene-authored CharacterController height while crouching. Standing dimensions and camera position come directly from the scene.")]
+    [Range(.4f, .9f)] public float crouchFraction = .65f;
 
     [Header("Ground Detection")]
     public Transform groundCheck;
@@ -29,12 +29,18 @@ public class PlayerMovement : MonoBehaviour
     public float soundCutoffDelay = 0.1f;
 
     private CharacterController controller;
+    private Transform viewTransform;
+    private float standingHeight, standingStepOffset, crouchCameraOffset;
+    private Vector3 standingCenter, standingCameraLocal;
     private Vector3 velocity;
     private bool isGrounded;
     private bool wasGrounded;
     private float inactiveTimer = 0f;
     private Vector3 lastSafePosition;
     private bool hasSafePosition;
+    public bool IsCrouching => isActiveAndEnabled && Input.GetKey(KeyCode.C);
+    public bool IsSprinting => isActiveAndEnabled && !IsCrouching && Input.GetKey(KeyCode.LeftShift);
+    public float CurrentMoveSpeed => IsCrouching ? crouchSpeed : IsSprinting ? sprintSpeed : walkSpeed;
 
     // Cutscene teleports must not carry a stored falling velocity into gameplay.
     public void ResetMotion()
@@ -50,11 +56,50 @@ public class PlayerMovement : MonoBehaviour
     {
         inactiveTimer = 0f;
         SoundManager.Instance?.StopLoopInstant();
+        if (controller != null)
+        {
+            controller.height = standingHeight;
+            controller.center = standingCenter;
+            controller.stepOffset = standingStepOffset;
+        }
+        if (viewTransform != null && crouchCameraOffset > 0)
+        {
+            Vector3 local = viewTransform.localPosition;
+            local.y = standingCameraLocal.y;
+            viewTransform.localPosition = local;
+            crouchCameraOffset = 0;
+        }
     }
 
     void Awake()
     {
         controller = GetComponent<CharacterController>();
+        standingHeight = controller.height;
+        standingCenter = controller.center;
+        standingStepOffset = controller.stepOffset;
+        var look = GetComponentInChildren<MouseLook>(true);
+        viewTransform = look != null ? look.transform : null;
+        if (viewTransform != null) standingCameraLocal = viewTransform.localPosition;
+    }
+
+    void ApplyBodyDimensions(bool crouched)
+    {
+        if (controller == null) return;
+        controller.height = crouched ? Mathf.Max(standingHeight * crouchFraction, controller.radius * 2) : standingHeight;
+        // Lower the top while crouching without moving the feet through the floor.
+        controller.center = standingCenter + Vector3.up * ((controller.height - standingHeight) * .5f);
+        controller.stepOffset = Mathf.Min(standingStepOffset, controller.height * .5f);
+    }
+
+    void SetViewHeight(bool crouched, bool instant)
+    {
+        if (viewTransform == null) return;
+        float targetOffset = crouched ? standingHeight - controller.height : 0;
+        if (targetOffset == 0 && crouchCameraOffset == 0) return;
+        crouchCameraOffset = instant ? targetOffset : Mathf.MoveTowards(crouchCameraOffset, targetOffset, 3f * Time.deltaTime);
+        Vector3 local = viewTransform.localPosition;
+        local.y = standingCameraLocal.y - crouchCameraOffset;
+        viewTransform.localPosition = local;
     }
 
     private bool CheckGround()
@@ -109,12 +154,9 @@ public class PlayerMovement : MonoBehaviour
             currentSpeed = sprintSpeed;
         }
 
-        if (Input.GetKeyDown(KeyCode.C) || Input.GetKeyUp(KeyCode.C))
-        {
-            controller.height = Input.GetKey(KeyCode.C) ? crouchHeight : standingHeight;
-            // The capsule shrinks from the head, keeping its feet on the floor.
-            controller.center = new Vector3(controller.center.x, (controller.height - standingHeight) * .5f, controller.center.z);
-        }
+        ApplyBodyDimensions(IsCrouching);
+
+        SetViewHeight(Input.GetKey(KeyCode.C), false);
 
         if (Input.GetKey(KeyCode.C)) currentSpeed = crouchSpeed;
 

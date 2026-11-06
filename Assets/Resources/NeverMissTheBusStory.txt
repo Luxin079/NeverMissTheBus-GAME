@@ -43,10 +43,10 @@ Ethan|Did we crash?!
 ACTION|The bus is completely still.
 Lucas|Why did we stop?
 Noah|I don't know.
+Lucas|Where is the bus driver?
 Ethan|Let's go see.
 #SCENE The Missing Driver|1|1
 ACTION|The boys slowly walk toward the front of the bus.
-Lucas|Where's the driver?
 Noah|He was right there...
 Ethan|Maybe he got out.
 Lucas|Look.

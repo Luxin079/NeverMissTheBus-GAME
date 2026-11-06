@@ -23,12 +23,18 @@ public partial class StoryCutsceneDirector
     public float schoolEstablishingLookHeight = 2.8f;
     [Min(0)] public float schoolExitStaggerSeconds = .8f;
     public Vector3 speakerCameraOffset = new Vector3(-2.5f, 2.2f, -4.5f);
+    [Tooltip("Close speaker shot at school: sideways, height above face, distance in front.")]
+    public Vector3 schoolSpeakerCloseOffset = new Vector3(-.6f, .35f, 2.4f);
+    [Range(25, 65)] public float schoolSpeakerFieldOfView = 38f;
     [Tooltip("Camera offset in world metres while following the arriving bus: along its length, height, side.")]
     public Vector3 busStopCameraOffset = new Vector3(-8, 4.5f, 7);
     [Tooltip("Exact place under the bus shelter where the boys wait. Optional; otherwise Waiting Offset is used.")]
     public Transform waitingShelterAnchor;
     [Tooltip("Fine adjustment of the waiting row inside the selected shelter, in its local coordinates.")]
     public Vector3 waitingShelterLocalOffset;
+    [Tooltip("Optional three empty GameObjects for the waiting row: Ethan/Player, Lucas, Noah. Place them at foot height under the shelter.")]
+    public Transform[] waitingBoyPoints = new Transform[3];
+    [Min(.4f)] public float waitingRowSpacing = .8f;
     [Tooltip("Fallback waiting place in world metres: X along bus length, Z toward the shelter.")]
     public Vector3 waitingOffset = new Vector3(-3, 0, 3.2f);
     [Tooltip("Optional exact position and rotation of the bus the boys miss outside school.")]
@@ -49,14 +55,81 @@ public partial class StoryCutsceneDirector
     [Min(4)] public float groupCameraDistance = 13;
     public float speakerLookHeight = .85f;
     public float friendWalkSpeed = 2.5f;
+    [Header("Sprite walking bob")]
+    [Min(0)] public float walkBobHeight = .025f;
+    [Min(.2f)] public float walkBobStride = .85f;
+    readonly Dictionary<Transform, Vector3> bobPreviousPosition = new Dictionary<Transform, Vector3>();
+    readonly Dictionary<Transform, float> bobPhase = new Dictionary<Transform, float>();
+    readonly Dictionary<Transform, float> bobOffset = new Dictionary<Transform, float>();
+    MaterialPropertyBlock walkBobProperties;
+    [Header("Back sprite colour matching")]
+    [Range(0, 1)] public float backSpriteSaturation = .65f;
+    [Range(.1f, 1.5f)] public float backSpriteBrightness = .67f;
+    public Color backSpriteTint = new Color(.94f, .97f, 1f);
+
+    void GroundStandingFriends()
+    {
+        foreach (var actor in friends.Values)
+        {
+            if (actor == null || !actor.gameObject.activeInHierarchy || seatedSpriteActors.Contains(actor)) continue;
+            var visual = actor.GetComponentInChildren<Renderer>();
+            if (visual == null) continue;
+            Vector3 feet = actor.position; feet.y = visual.bounds.min.y;
+            float groundY = float.NegativeInfinity;
+            // The school porch can sit above the terrain. Probe from the door
+            // height, then select the upper walkable surface, not the terrain
+            // closest to already-sunken feet.
+            float probeY = CurrentScene == 0 && schoolExit != null
+                ? Mathf.Max(feet.y + .6f, schoolExit.position.y + 1.5f) : feet.y + .6f;
+            Vector3 probe = new Vector3(feet.x, probeY, feet.z);
+            foreach (var hit in Physics.RaycastAll(probe, Vector3.down, Mathf.Max(1.8f,probeY-feet.y+1.2f), ~0, QueryTriggerInteraction.Ignore))
+            {
+                if (hit.normal.y < .7f || hit.transform.IsChildOf(existingPlayer)) continue;
+                bool character = false;
+                foreach (var other in friends.Values)
+                    if (other != null && hit.transform.IsChildOf(other)) { character = true; break; }
+                if (character) continue;
+                if (hit.point.y > groundY) groundY = hit.point.y;
+            }
+            if (!float.IsNegativeInfinity(groundY)) actor.position += Vector3.up * (groundY + actorGroundClearance - feet.y);
+        }
+    }
+
+    void UpdateWalkingBob()
+    {
+        foreach (var actor in friends.Values)
+        {
+            if (actor == null) continue;
+            bobPreviousPosition.TryGetValue(actor, out var previous);
+            Vector3 delta = actor.position - previous;
+            delta.y = 0;
+            float distance = bobPreviousPosition.ContainsKey(actor) ? delta.magnitude : 0;
+            bobPreviousPosition[actor] = actor.position;
+            bobPhase.TryGetValue(actor, out float phase);
+            bobOffset.TryGetValue(actor, out float offset);
+            // Ignore staging teleports and animate only actual horizontal travel.
+            bool moving = actor.gameObject.activeInHierarchy && distance > .0005f && distance < .5f;
+            if (moving) phase = Mathf.Repeat(phase + distance / Mathf.Max(.2f, walkBobStride) * Mathf.PI * 2, Mathf.PI * 2);
+            float target = moving ? (1 - Mathf.Cos(phase)) * .5f * walkBobHeight : 0;
+            offset = Mathf.MoveTowards(offset, target, Time.deltaTime * .3f);
+            bobPhase[actor] = phase;
+            bobOffset[actor] = offset;
+            foreach (var visual in actor.GetComponentsInChildren<SpriteRenderer>())
+            {
+                visual.GetPropertyBlock(walkBobProperties);
+                walkBobProperties.SetFloat("_WalkBob", offset);
+                visual.SetPropertyBlock(walkBobProperties);
+            }
+        }
+    }
     [Header("Companion follow")]
     [Min(.1f)] public float friendFollowStartDistance = .55f;
     [Min(.1f)] public float friendTrailingDistance = 2.1f;
     [Min(.1f)] public float friendFollowStopDistance = .25f;
     [Header("Boy visuals")]
-    [Tooltip("Overall height/width multiplier for the three boys; their individual Visual Scale fields still work.")]
-    [Range(.3f, 1f)] public float boyVisualScale = .72f;
-    [Range(.25f, 1.5f)] public float seatedActorScale = .65f;
+    [Tooltip("Optional body renderer of the Player. Boys match this model's width and height, including SpriteRenderers. Defaults to the renderer on the Player.")]
+    public Renderer playerSizeReference;
+    Vector3 lastPlayerVisualSize;
     [Min(.5f)] public float schoolRowSpacing = 1.3f;
     [Tooltip("Bus movement axis in the selected bus prefab. X is along its length in the original bus model.")]
     public Vector3 busTravelLocalDirection = Vector3.right;
@@ -67,6 +140,12 @@ public partial class StoryCutsceneDirector
     [Min(1)] public float lastBusApproachDistance = 28;
     [Min(0)] public float crashShakeSeconds = .8f;
     [Min(0)] public float crashShakeStrength = .16f;
+    [Header("Crash pacing and safe recovery")]
+    [Min(.5f)] public float dramaticCrashSeconds = 2.6f;
+    [Min(0)] public float crashRecoveryPause = 1.4f;
+    [Tooltip("Optional empty in the clear aisle, at floor level, where the player stands after the crash dialogue.")]
+    public Transform postCrashStandPoint;
+    Vector3? lastWalkableBusLocal;
     public string busSpottingLine = "Hey, the bus!";
     [Tooltip("Off by default: leave the opening on the seated shot. Enable to play the later chapters too.")]
     public bool continueAfterSeating = true;
@@ -77,7 +156,10 @@ public partial class StoryCutsceneDirector
     public Transform driverSeatInspectionAnchor;
     [Tooltip("Fallback inspection point in the bus prefab's local coordinates.")]
     public Vector3 driverSeatInspectionLocal = new Vector3(-.28f, .10f, -.06f);
-    [Min(.5f)] public float driverSeatInspectionRadius = 1.7f;
+    [Min(.3f)] public float driverSeatInspectionRadius = .7f;
+    [Tooltip("Optional camera target on the driver's seat. Defaults to the placed glasses.")]
+    public Transform driverSeatLookTarget;
+    [Min(.1f)] public float driverSeatLookSeconds = .6f;
 
     readonly Dictionary<string, Transform> friends = new Dictionary<string, Transform>();
     readonly Dictionary<string, Vector3> standingScales = new Dictionary<string, Vector3>();
@@ -88,6 +170,34 @@ public partial class StoryCutsceneDirector
     enum CutsceneCameraMode { Fixed, Group, Speaker, MovingBus, ArrivingBus }
     CutsceneCameraMode cameraMode;
     Transform cameraSpeaker, cameraBus;
+    Transform seatedLookTarget;
+    bool investigationLookLocked;
+    bool investigationLookAtGlasses;
+
+    Vector3 InvestigationLookPoint()
+    {
+        if (investigationLookAtGlasses && sceneGlassesPickup != null)
+        {
+            var sprite = sceneGlassesPickup.GetComponentInChildren<SpriteRenderer>(true);
+            if (sprite != null) return sprite.bounds.center;
+            return sceneGlassesPickup.transform.position;
+        }
+        return driverSeatLookTarget != null ? driverSeatLookTarget.position
+            : existingDriver != null ? existingDriver.transform.position
+            : existingBus.TransformPoint(driverSeatInspectionLocal) + Vector3.up * .65f;
+    }
+
+    bool FocusInvestigationLine(string words)
+    {
+        if (CurrentScene != 3 && CurrentScene != 4) return false;
+        string line = words.ToLowerInvariant();
+        if (line.Contains("where is the bus driver") || CurrentScene == 4)
+            investigationLookLocked = true;
+        if (CurrentScene == 4 && (line.Contains("blood") || line.Contains("glasses") || line == "look."))
+            investigationLookAtGlasses = true;
+        return investigationLookLocked;
+    }
+    bool holdSeatedView;
     Vector3 desiredCameraPosition, desiredCameraLook, cameraVelocity;
     bool cinematicCamera, glassesCollected, driverSeatFound, seatedDialogueCamera, boardingFirstPerson, exploringFirstPerson;
     float crashShakeUntil;
@@ -163,14 +273,34 @@ public partial class StoryCutsceneDirector
 
     void LateUpdate()
     {
+        if (musicSource != null) musicSource.volume = Mathf.MoveTowards(musicSource.volume,
+            Time.timeScale <= 0 ? 0 : musicVolume * (IsDialogueLinePlaying ? .35f : 1f), Time.unscaledDeltaTime * .3f);
+        if (IsPlaying) UpdateNightSounds();
         if (!IsPlaying || Time.timeScale <= 0) return;
+        UpdateInteriorAtmosphere();
+        UpdateWalkingBob();
+        MatchFriendSizes();
+        UpdateDirectionalSprites();
+        GroundStandingFriends();
         if (!cinematicCamera)
         {
+            if ((investigationLookLocked || (seatedDialogueCamera && !holdSeatedView)) && gameCamera != null && gameCamera.enabled && existingBus != null)
+            {
+                Vector3 lookAt = investigationLookLocked ? InvestigationLookPoint() : seatedLookTarget != null && seatedLookTarget.gameObject.activeInHierarchy
+                    ? ActorLookPoint(seatedLookTarget) : SeatedForwardLook();
+                Vector3 direction = lookAt - gameCamera.transform.position;
+                if (direction.sqrMagnitude > .01f)
+                    gameCamera.transform.rotation = Quaternion.Slerp(gameCamera.transform.rotation,
+                        Quaternion.LookRotation(direction),
+                        1 - Mathf.Exp(-cameraRotationSpeed * Time.unscaledDeltaTime));
+            }
             if (gameCamera != null && gameCamera.enabled && Time.unscaledTime < crashShakeUntil)
             {
                 float scaleY = Mathf.Max(.01f, Mathf.Abs(existingPlayer.lossyScale.y));
-                gameCamera.transform.localPosition = playableCameraLocal +
-                    Random.insideUnitSphere * (crashShakeStrength / scaleY);
+                float remaining = Mathf.Clamp01((crashShakeUntil-Time.unscaledTime) / Mathf.Max(.1f, dramaticCrashSeconds));
+                // Low-frequency, decaying movement; never throw the camera through a seat.
+                Vector3 shake = new Vector3(Mathf.Sin(Time.unscaledTime*19), Mathf.Sin(Time.unscaledTime*13), 0);
+                gameCamera.transform.localPosition = playableCameraLocal + shake * (Mathf.Min(.045f, crashShakeStrength) * remaining / scaleY);
                 gameCameraShaking = true;
             }
             else if (gameCameraShaking && gameCamera != null)
@@ -187,7 +317,8 @@ public partial class StoryCutsceneDirector
         else if (cameraMode == CutsceneCameraMode.ArrivingBus && cameraBus != null) UpdateArrivingBusCameraTarget();
         float delta = Time.unscaledDeltaTime;
         float fieldOfView = seatedDialogueCamera ? seatedShotFieldOfView :
-            cameraMode == CutsceneCameraMode.MovingBus ? missedBusShotFieldOfView : 55;
+            cameraMode == CutsceneCameraMode.MovingBus ? missedBusShotFieldOfView :
+            CurrentScene == 0 && cameraMode == CutsceneCameraMode.Speaker ? schoolSpeakerFieldOfView : 55;
         storyCamera.fieldOfView = Mathf.MoveTowards(storyCamera.fieldOfView, fieldOfView, delta * 24);
         storyCamera.transform.position = Vector3.SmoothDamp(storyCamera.transform.position,
             desiredCameraPosition, ref cameraVelocity, cameraFollowSmoothTime, Mathf.Infinity, delta);
@@ -300,7 +431,8 @@ public partial class StoryCutsceneDirector
     Vector3 ActorLookPoint(Transform actor)
     {
         var renderer = actor.GetComponentInChildren<Renderer>();
-        return renderer != null ? renderer.bounds.center : actor.position + Vector3.up * speakerLookHeight;
+        return renderer != null ? renderer.bounds.center + Vector3.up * renderer.bounds.size.y * .28f
+            : actor.position + Vector3.up * speakerLookHeight;
     }
 
     void UpdateSpeakerCameraTarget()
@@ -324,8 +456,8 @@ public partial class StoryCutsceneDirector
         // Never put an opening dialogue camera behind the school facade.
         if (CurrentScene == 0)
         {
-            offset.x *= .55f;
-            offset.z = Mathf.Clamp(Mathf.Abs(offset.z) * .65f, 3.5f, 6.5f);
+            offset = schoolSpeakerCloseOffset;
+            offset.z = Mathf.Max(.5f, Mathf.Abs(offset.z));
         }
         Vector3 right = CurrentScene == 0 && schoolExit != null ? schoolExit.right : existingBus.right;
         Vector3 forward = CurrentScene == 0 && schoolExit != null ? schoolExit.forward : existingBus.forward;
@@ -335,12 +467,23 @@ public partial class StoryCutsceneDirector
 
     void FocusSpeaker(string who)
     {
-        if (boardingFirstPerson || exploringFirstPerson) return;
         Transform target = null;
         string role = ActorRole(who);
         if (role == "Bus Driver" && existingDriver != null && existingDriver.gameObject.activeSelf) target = existingDriver.transform;
         else friends.TryGetValue(role, out target);
+        if (seatedDialogueCamera)
+        {
+            // Ethan is the first-person player. When he answers, keep looking at
+            // the person who was speaking instead of snapping back down the aisle.
+            holdSeatedView = role == "Ethan";
+            if (!holdSeatedView && target != null) seatedLookTarget = target;
+            return;
+        }
+        // After the crash exploration is already flagged, but seated dialogue
+        // must still resolve its speaker before the exploration early-out.
+        if (boardingFirstPerson || exploringFirstPerson) return;
         if (target == null) return;
+        if (cameraSpeaker != target) cameraVelocity = Vector3.zero;
         cameraSpeaker = target;
         cameraMode = CutsceneCameraMode.Speaker;
         cinematicCamera = true;
@@ -353,33 +496,223 @@ public partial class StoryCutsceneDirector
         return existingBus.TransformPoint(seatedCameraLocal + new Vector3(-.55f, -.025f, .025f));
     }
 
+    readonly List<Sprite> winterSprites = new List<Sprite>();
+    SpriteRenderer playerSpriteVisual;
+    readonly Dictionary<Transform, Sprite[]> directionalSprites = new Dictionary<Transform, Sprite[]>();
+    readonly Dictionary<Transform, Vector3> spriteLastPositions = new Dictionary<Transform, Vector3>();
+    readonly Dictionary<Transform, Vector3> spriteHeadings = new Dictionary<Transform, Vector3>();
+    readonly HashSet<Transform> seatedSpriteActors = new HashSet<Transform>();
+
+    Sprite PoseSprite(int role, bool seated, Sprite front)
+    {
+        var sheet = Resources.Load<Texture2D>("Characters/WinterBoysPoses");
+        if (sheet == null || !sheet.isReadable) return null;
+        int column = role == 0 ? 0 : role == 1 ? 2 : 1;
+        int cellWidth = sheet.width / 3;
+        int split = Mathf.RoundToInt(sheet.height * .46875f);
+        int minX = (column + 1) * cellWidth, maxX = column * cellWidth;
+        int minY = sheet.height, maxY = 0;
+        var pixels = sheet.GetPixels32();
+        for (int y = seated ? 0 : split; y < (seated ? split : sheet.height); y++)
+            for (int x = column * cellWidth; x < (column + 1) * cellWidth; x++)
+                if (pixels[y * sheet.width + x].a > 128)
+                { minX = Mathf.Min(minX, x); maxX = Mathf.Max(maxX, x); minY = Mathf.Min(minY, y); maxY = Mathf.Max(maxY, y); }
+        if (maxX <= minX || maxY <= minY) return null;
+        float height = maxY - minY + 1;
+        var pose = Sprite.Create(sheet, new Rect(minX, minY, maxX-minX+1, height),
+            new Vector2(.5f, seated ? .24f : 0), height / (front.bounds.size.y * (seated ? .78f : 1f)), 0, SpriteMeshType.FullRect);
+        winterSprites.Add(pose);
+        return pose;
+    }
+
+    void UpdateDirectionalSprites()
+    {
+        Camera viewer = cinematicCamera ? storyCamera : gameCamera;
+        if (viewer == null) return;
+        foreach (var pair in directionalSprites)
+        {
+            var actor = pair.Key;
+            if (actor == null) continue;
+            var visual = actor.GetComponent<SpriteRenderer>();
+            if (visual == null) continue;
+            Vector3 delta = spriteLastPositions.TryGetValue(actor, out var last) ? actor.position-last : Vector3.zero;
+            spriteLastPositions[actor] = actor.position;
+            delta.y = 0;
+            if (delta.sqrMagnitude > .000001f && delta.sqrMagnitude < .25f) spriteHeadings[actor] = delta.normalized;
+            bool seated = seatedSpriteActors.Contains(actor);
+            Vector3 towardCamera = viewer.transform.position-actor.position; towardCamera.y = 0;
+            bool actuallyWalking = Time.deltaTime > 0 && delta.magnitude > .08f * Time.deltaTime && delta.magnitude < .5f;
+            bool gameplay = !cinematicCamera && !seatedDialogueCamera && !IsDialogueLinePlaying &&
+                playerMovement != null && playerMovement.isActiveAndEnabled && Time.timeScale > 0;
+            bool back = gameplay && !seated && actuallyWalking && Vector3.Dot(delta.normalized, towardCamera.normalized) < -.35f;
+            visual.sprite = pair.Value[seated ? 2 : back ? 1 : 0] ?? pair.Value[0];
+            if (visual.sharedMaterial != null && visual.sharedMaterial.HasProperty("_BackGrade"))
+            {
+                bool usingBack = back && pair.Value[1] != null;
+                visual.sharedMaterial.SetFloat("_BackGrade", usingBack ? 1 : 0);
+                visual.sharedMaterial.SetFloat("_BackSaturation", backSpriteSaturation);
+                visual.sharedMaterial.SetFloat("_BackBrightness", backSpriteBrightness);
+                visual.sharedMaterial.SetColor("_BackTint", backSpriteTint);
+            }
+            // Only the original front sheet needs the olive-to-purple conversion.
+            // Back artwork already has its authored purple palette.
+            if (visual.sharedMaterial != null && visual.sharedMaterial.HasProperty("_Purple"))
+                visual.sharedMaterial.SetFloat("_Purple", visual.sprite == pair.Value[0] &&
+                    friends.TryGetValue("Lucas", out var dimash) && dimash == actor &&
+                    actors != null && actors.Length > 1 && actors[1].bodySprite == null ? 1 : 0);
+            // Seated portraits look toward the viewer; mirror the profile on the other side of the aisle.
+            visual.flipX = seated && existingBus != null && Vector3.Dot(towardCamera, existingBus.forward) < 0;
+        }
+    }
+    Renderer originalPlayerVisual;
+    bool originalPlayerVisualEnabled;
+
+    Sprite WinterSprite(int role)
+    {
+        var actor = actors != null && role < actors.Length ? actors[role] : null;
+        if (actor != null && actor.bodySprite != null) return actor.bodySprite;
+        var sheet = Resources.Load<Texture2D>("Characters/WinterBoys");
+        if (sheet == null) return null;
+        // Source order: Mass (left), Aremi (middle), Dimash (right).
+        Rect rect = role == 0 ? new Rect(12, 16, 490, 996)
+            : role == 1 ? new Rect(1034, 16, 490, 954) : new Rect(514, 16, 508, 984);
+        var sprite = Sprite.Create(sheet, rect, new Vector2(.5f, 0), 100, 0, SpriteMeshType.FullRect);
+        sprite.name = DisplayName(BoyRoles[role]);
+        winterSprites.Add(sprite);
+        return sprite;
+    }
+
+    SpriteRenderer AddWinterVisual(GameObject target, int role, Sprite sprite)
+    {
+        var visual = target.AddComponent<SpriteRenderer>();
+        visual.sprite = sprite;
+        var shader = Resources.Load<Shader>("Characters/WinterSprite");
+        if (shader != null)
+        {
+            var material = new Material(shader);
+            material.SetFloat("_Purple", role == 1 && actors[role].bodySprite == null ? 1 : 0);
+            visual.sharedMaterial = material;
+            materials.Add(material);
+        }
+        // The new winter sprites use -Z; do not change existing sprites such as the driver.
+        target.AddComponent<YBillboard>().frontFacesNegativeZ = true;
+        // Use the original front portrait in bus seats, retaining walking back views.
+        directionalSprites[target.transform] = new[] { sprite, PoseSprite(role, false, sprite), (Sprite)null };
+        return visual;
+    }
+
     void CreateFriends()
     {
+        // Keep the authored controller and scale; the original mesh still defines body size.
+        originalPlayerVisual = existingPlayer.GetComponent<Renderer>();
+        var mainSprite = WinterSprite(0);
+        if (mainSprite != null && originalPlayerVisual != null)
+        {
+            originalPlayerVisualEnabled = originalPlayerVisual.enabled;
+            originalPlayerVisual.enabled = false;
+            playerSizeReference = originalPlayerVisual;
+            var body = new GameObject("Mass - Player Sprite");
+            body.transform.SetParent(existingPlayer, false);
+            playerSpriteVisual = AddWinterVisual(body, 0, mainSprite);
+            Bounds bounds = originalPlayerVisual.localBounds;
+            body.transform.localPosition = new Vector3(bounds.center.x, bounds.min.y, bounds.center.z);
+            body.transform.localScale = new Vector3(bounds.size.x / mainSprite.bounds.size.x,
+                bounds.size.y / mainSprite.bounds.size.y, 1);
+            // First-person uses the real camera, not a sprite in front of the lens.
+            // The story's Mass stand-in supplies the same artwork in group shots.
+            playerSpriteVisual.enabled = false;
+            spawnedVisuals.Add(body);
+        }
         for (int i = 0; i < 3; i++)
         {
             Actor actor = actors != null && i < actors.Length ? actors[i] : null;
             string role = BoyRoles[i];
             GameObject go;
             if (actor != null && actor.artPrefab != null) go = Instantiate(actor.artPrefab);
+            else if (WinterSprite(i) is Sprite sprite)
+            {
+                go = new GameObject(DisplayName(role));
+                AddWinterVisual(go, i, sprite);
+            }
             else
             {
                 go = GameObject.CreatePrimitive(PrimitiveType.Capsule);
                 var material = new Material(Shader.Find("Universal Render Pipeline/Lit"));
                 material.color = actor != null ? actor.color : Color.white;
                 materials.Add(material); go.GetComponent<Renderer>().sharedMaterial = material;
-                go.transform.localScale = new Vector3(.5f, .85f, .5f);
+                // A Unity capsule is already twice as tall as it is wide.
+                // Keep its transform uniform so the boys do not become needles.
+                go.transform.localScale = Vector3.one * .85f;
             }
             go.name = "Story " + DisplayName(role);
-            go.transform.localScale *= boyVisualScale * (actor != null ? Mathf.Max(.05f, actor.visualScale) : 1f);
             spawnedVisuals.Add(go); friends[role] = go.transform; standingScales[role] = go.transform.localScale;
             foreach (var collider in go.GetComponentsInChildren<Collider>()) collider.enabled = false;
             if (go.GetComponentInChildren<SpriteRenderer>() != null && go.GetComponentInChildren<YBillboard>() == null)
                 go.AddComponent<YBillboard>();
         }
+        lastPlayerVisualSize = Vector3.zero;
+        MatchFriendSizes();
+    }
+
+    void MatchFriendSizes()
+    {
+        if (existingPlayer == null) return;
+        if (playerSizeReference == null)
+        {
+            playerSizeReference = existingPlayer.GetComponent<Renderer>();
+            if (playerSizeReference == null)
+                foreach (var body in existingPlayer.GetComponentsInChildren<Renderer>(true))
+                    if (body.GetComponentInParent<Camera>() == null && body.GetComponentInParent<Canvas>() == null)
+                    { playerSizeReference = body; break; }
+        }
+        if (playerSizeReference == null) return;
+        Vector3 size = Vector3.Scale(playerSizeReference.localBounds.size, playerSizeReference.transform.lossyScale);
+        size = new Vector3(Mathf.Abs(size.x), Mathf.Abs(size.y), Mathf.Abs(size.z));
+        if (size.x < .001f || size.y < .001f || (size - lastPlayerVisualSize).sqrMagnitude < .000001f) return;
+        lastPlayerVisualSize = size;
+        foreach (var pair in friends)
+        {
+            Transform actor = pair.Value;
+            if (actor == null) continue;
+            bool found = false;
+            Bounds bounds = default;
+            float feet = float.PositiveInfinity;
+            bool sprite = false;
+            foreach (var visual in actor.GetComponentsInChildren<Renderer>(true))
+            {
+                if (visual.GetComponentInParent<Canvas>() != null) continue;
+                sprite |= visual is SpriteRenderer;
+                feet = Mathf.Min(feet, visual.bounds.min.y);
+                Bounds local = visual.localBounds;
+                for (int corner = 0; corner < 8; corner++)
+                {
+                    Vector3 point = local.center + Vector3.Scale(local.extents, new Vector3(
+                        (corner & 1) == 0 ? -1 : 1, (corner & 2) == 0 ? -1 : 1, (corner & 4) == 0 ? -1 : 1));
+                    point = actor.InverseTransformPoint(visual.transform.TransformPoint(point));
+                    if (!found) { bounds = new Bounds(point, Vector3.zero); found = true; }
+                    else bounds.Encapsulate(point);
+                }
+            }
+            if (!found) continue;
+            Vector3 current = Vector3.Scale(bounds.size, actor.lossyScale);
+            Vector3 scale = actor.localScale;
+            if (Mathf.Abs(current.x) > .001f) scale.x *= size.x / Mathf.Abs(current.x);
+            if (Mathf.Abs(current.y) > .001f) scale.y *= size.y / Mathf.Abs(current.y);
+            if (!sprite && Mathf.Abs(current.z) > .001f) scale.z *= (size.z > .001f ? size.z : size.x) / Mathf.Abs(current.z);
+            actor.localScale = scale;
+            standingScales[pair.Key] = scale;
+            float resizedFeet = float.PositiveInfinity;
+            foreach (var visual in actor.GetComponentsInChildren<Renderer>(true))
+                if (visual.GetComponentInParent<Canvas>() == null) resizedFeet = Mathf.Min(resizedFeet, visual.bounds.min.y);
+            if (!float.IsInfinity(resizedFeet)) actor.position += Vector3.up * (feet - resizedFeet);
+        }
     }
 
     void PlaceFriends(int scene, Vector3 anchor)
     {
+        seatedSpriteActors.Clear();
+        foreach (var pair in directionalSprites)
+            if (pair.Key != null) pair.Key.GetComponent<SpriteRenderer>().sprite = pair.Value[0];
         companionFollowReady = companionsFollowing = false;
         friendFollowVelocity.Clear();
         string[] names = { "Ethan", "Lucas", "Noah" };
@@ -392,7 +725,7 @@ public partial class StoryCutsceneDirector
             Vector3 position = anchor + rowRight * (i - 1) * schoolRowSpacing;
             Quaternion rotation = Quaternion.identity;
             Shot shot = scene < shots.Length ? shots[scene] : null;
-            if (shot != null && shot.actorPositions != null)
+            if (scene != 1 && shot != null && shot.actorPositions != null)
                 foreach (var placement in shot.actorPositions)
                     if (placement != null && ActorRole(placement.actorName) == names[i])
                     {
@@ -404,7 +737,14 @@ public partial class StoryCutsceneDirector
                         break;
                     }
             if (standingScales.TryGetValue(names[i], out var scale)) friend.localScale = scale;
-            if (scene == 1) position.y = WaitingGroundHeight(position);
+            if (scene == 1)
+            {
+                position = WaitingBoyFeet(i);
+                Vector3 facing = doorOutside - position;
+                facing.y = 0;
+                if (facing.sqrMagnitude > .01f) rotation = Quaternion.LookRotation(facing);
+            }
+            if (scene != 1 && TryWalkableGroundHeight(position, out float floorHeight)) position.y = floorHeight;
             friend.SetPositionAndRotation(position, rotation);
             var renderer = friend.GetComponentInChildren<Renderer>();
             if (renderer != null) friend.position += Vector3.up * (position.y + actorGroundClearance - renderer.bounds.min.y);
@@ -414,6 +754,43 @@ public partial class StoryCutsceneDirector
     float WaitingGroundHeight(Vector3 position)
     {
         return TryWalkableGroundHeight(position, out float height) ? height : position.y;
+    }
+
+    Vector3 WaitingBoyFeet(int index)
+    {
+        if (waitingBoyPoints != null && index < waitingBoyPoints.Length && waitingBoyPoints[index] != null)
+            return waitingBoyPoints[index].position;
+
+        Vector3 center = doorOutside + existingBus.right * waitingOffset.x +
+            Vector3.up * waitingOffset.y + existingBus.forward * waitingOffset.z;
+        Vector3 row = existingBus.right;
+        float spacing = waitingRowSpacing;
+        if (waitingShelterAnchor != null)
+        {
+            center = waitingShelterAnchor.position;
+            row = waitingShelterAnchor.right;
+            var renderers = waitingShelterAnchor.GetComponentsInChildren<Renderer>();
+            if (renderers.Length > 0)
+            {
+                Bounds shelter = renderers[0].bounds;
+                for (int i = 1; i < renderers.Length; i++) shelter.Encapsulate(renderers[i].bounds);
+                // The imported shelter's pivot and local right axis are not the
+                // centre and width of its usable space. Use the actual geometry.
+                bool alongX = shelter.size.x >= shelter.size.z;
+                row = alongX ? Vector3.right : Vector3.forward;
+                Vector3 front = alongX ? Vector3.forward : Vector3.right;
+                if (Vector3.Dot(front, doorOutside - shelter.center) < 0) front = -front;
+                float halfWidth = alongX ? shelter.extents.x : shelter.extents.z;
+                float halfDepth = alongX ? shelter.extents.z : shelter.extents.x;
+                center = shelter.center + front * (halfDepth * .55f);
+                center.y = waitingShelterAnchor.position.y;
+                spacing = Mathf.Min(spacing, Mathf.Max(.4f, halfWidth - .55f));
+            }
+            center += waitingShelterAnchor.TransformVector(waitingShelterLocalOffset);
+        }
+        Vector3 feet = center + row * ((index - 1) * spacing);
+        feet.y = WaitingGroundHeight(feet);
+        return feet;
     }
 
     bool TryWalkableGroundHeight(Vector3 position, out float height)
@@ -432,7 +809,7 @@ public partial class StoryCutsceneDirector
     IEnumerator MoveFriend(Transform friend, Vector3 destination)
     {
         if (friend == null) yield break;
-        while ((friend.position - destination).sqrMagnitude > .04f)
+        while (Vector3.ProjectOnPlane(friend.position - destination, Vector3.up).sqrMagnitude > .04f)
         {
             Vector3 direction = destination - friend.position;
             friend.position = Vector3.MoveTowards(friend.position, destination, friendWalkSpeed * Time.deltaTime);
@@ -467,20 +844,30 @@ public partial class StoryCutsceneDirector
                 if (local < 0) continue;
                 if (!boys[i].gameObject.activeSelf) boys[i].gameObject.SetActive(true);
                 float progress = Mathf.SmoothStep(0, 1, Mathf.Clamp01(local / schoolWalkDuration));
-                boys[i].position = Vector3.Lerp(doorway[i], line[i], progress);
+                Vector3 next = Vector3.Lerp(doorway[i], line[i], progress);
+                // Animate the route horizontally; keep the previous grounded
+                // height so each frame does not push the feet under the steps.
+                next.y = boys[i].position.y;
+                boys[i].position = next;
             }
+            GroundStandingFriends();
             if (Mathf.FloorToInt(elapsed * 2.5f) != Mathf.FloorToInt((elapsed - Time.deltaTime) * 2.5f))
                 PlayEffect(footstepsSound, 2);
             yield return null;
         }
         for (int i = 0; i < boys.Length; i++) if (boys[i] != null)
-        { boys[i].gameObject.SetActive(true); boys[i].position = line[i]; }
+        {
+            boys[i].gameObject.SetActive(true);
+            Vector3 end = line[i]; end.y = boys[i].position.y;
+            boys[i].position = end;
+        }
+        GroundStandingFriends();
     }
 
     IEnumerator DriveVisualBus(Transform bus, Vector3 destination, float speed)
     {
         while (bus != null && (bus.position - destination).sqrMagnitude > .04f)
-        { bus.position = Vector3.MoveTowards(bus.position, destination, speed * Time.deltaTime); yield return null; }
+        { Vector3 previous = bus.position; bus.position = Vector3.MoveTowards(bus.position, destination, speed * Time.deltaTime); RollBusWheels(bus, bus.position - previous); yield return null; }
     }
 
     IEnumerator DepartMissedBus(Transform bus, Vector3 destination)
@@ -493,7 +880,7 @@ public partial class StoryCutsceneDirector
     IEnumerator DriveBus(Vector3 destination, float speed)
     {
         while ((existingBus.position - destination).sqrMagnitude > .04f)
-        { existingBus.position = Vector3.MoveTowards(existingBus.position, destination, speed * Time.deltaTime); yield return null; }
+        { Vector3 previous = existingBus.position; existingBus.position = Vector3.MoveTowards(existingBus.position, destination, speed * Time.deltaTime); RollBusWheels(existingBus, existingBus.position - previous); yield return null; }
     }
 
     IEnumerator WaitUnpaused(float seconds)
@@ -509,16 +896,24 @@ public partial class StoryCutsceneDirector
         for (int i = includeEthan ? 0 : 1; i < names.Length; i++)
         {
             if (!friends.TryGetValue(names[i], out var friend)) continue;
-            if (standingScales.TryGetValue(names[i], out var standing)) friend.localScale = standing * seatedActorScale;
+            if (standingScales.TryGetValue(names[i], out var standing)) friend.localScale = standing;
             friend.position = CompanionSeatPosition(i);
             friend.rotation = SeatedActorRotation(i);
+            // Being seated is independent of having a separate seated artwork.
+            seatedSpriteActors.Add(friend);
+            bool hasSeatedPose = directionalSprites.TryGetValue(friend, out var poses) && poses[2] != null;
+            if (hasSeatedPose)
+            {
+                seatedSpriteActors.Add(friend);
+                friend.GetComponent<SpriteRenderer>().sprite = poses[2];
+            }
             // Correct non-foot sprite pivots, so the artwork sits above the seat surface.
             var renderer = friend.GetComponentInChildren<Renderer>();
-            if (renderer != null) friend.position += Vector3.up * (CompanionSeatPosition(i).y - renderer.bounds.min.y);
+            if (renderer != null && !hasSeatedPose) friend.position += Vector3.up * (CompanionSeatPosition(i).y - renderer.bounds.min.y);
         }
     }
 
-    void StandFriendsAfterCrash()
+    void KeepFriendsSeatedAfterCrash()
     {
         companionFollowReady = companionsFollowing = false;
         friendFollowVelocity.Clear();
@@ -526,14 +921,11 @@ public partial class StoryCutsceneDirector
         {
             string name = i == 1 ? "Lucas" : "Noah";
             if (!friends.TryGetValue(name, out var friend) || friend == null) continue;
-            if (standingScales.TryGetValue(name, out var scale)) friend.localScale = scale;
             friend.gameObject.SetActive(true);
-            Vector3 floor = existingBus.TransformPoint(new Vector3(.19f, busAisleLocal.y,
-                i == 1 ? -.09f : .09f));
-            friend.SetPositionAndRotation(floor, Quaternion.LookRotation(-existingBus.right));
-            var renderer = friend.GetComponentInChildren<Renderer>();
-            if (renderer != null) friend.position += Vector3.up * (floor.y + actorGroundClearance - renderer.bounds.min.y);
         }
+        // Keep the same configured seats and seat-surface pivot correction as before impact.
+        // Only the playable character gets up to investigate the driver's seat.
+        SeatFriends(false);
         if (friends.TryGetValue("Ethan", out var playerVisual) && playerVisual != null)
             playerVisual.gameObject.SetActive(false);
     }
@@ -556,18 +948,54 @@ public partial class StoryCutsceneDirector
         }
     }
 
+    IEnumerator LookAtDriverSeat()
+    {
+        Vector3 target = driverSeatLookTarget != null ? driverSeatLookTarget.position
+            : sceneGlassesPickup != null ? sceneGlassesPickup.transform.position
+            : existingBus.TransformPoint(driverSeatInspectionLocal) + Vector3.up * .35f;
+        Vector3 direction = target - gameCamera.transform.position;
+        if (direction.sqrMagnitude < .001f) yield break;
+        Quaternion start = gameCamera.transform.rotation;
+        Quaternion end = Quaternion.LookRotation(direction, Vector3.up);
+        float duration = Mathf.Max(.1f, driverSeatLookSeconds);
+        for (float elapsed = 0; elapsed < duration; elapsed += Time.deltaTime)
+        {
+            gameCamera.transform.rotation = Quaternion.Slerp(start, end,
+                Mathf.SmoothStep(0, 1, elapsed / duration));
+            yield return null;
+        }
+        gameCamera.transform.rotation = end;
+    }
+
     IEnumerator WaitForAisleMidpoint()
     {
-        SetObjective("Loop door de bus naar achteren.");
-        Vector3 start = existingBus.InverseTransformPoint(doorThreshold);
-        Vector3 end = existingBus.InverseTransformPoint(BackSeatFeet(0));
-        Vector2 path = new Vector2(end.x - start.x, end.z - start.z);
-        float lengthSquared = Mathf.Max(path.sqrMagnitude, .0001f);
+        SetObjective("Loop naar je vrienden achterin de bus.");
+        // Use the authored bus body, not the generated floor's guessed height/width.
+        // The latter can reject a player visibly standing inside an imported bus.
+        MeshRenderer busBody = null;
+        foreach (var mesh in existingBus.GetComponentsInChildren<MeshRenderer>(true))
+            if (mesh.name == "bus_outer_body") { busBody = mesh; break; }
         while (true)
         {
-            Vector3 local = existingBus.InverseTransformPoint(existingPlayer.position);
-            Vector2 walked = new Vector2(local.x - start.x, local.z - start.z);
-            if (Vector2.Dot(walked, path) / lengthSquared >= aisleMidpoint) break;
+            Vector3 playerCenter = playerController.bounds.center;
+            bool inside = busBody == null || busBody.localBounds.Contains(
+                busBody.transform.InverseTransformPoint(playerCenter));
+            bool nearFriend = false;
+            for (int i = 1; i <= 2 && inside; i++)
+            {
+                Vector3 target = friends.TryGetValue(BoyRoles[i], out var friend) && friend != null
+                    ? friend.position : BackSeatFeet(i);
+                // Measure to the visible body, not a pivot that may sit above the seat.
+                float distance = Vector3.Distance(playerCenter, target);
+                if (friend != null)
+                    foreach (var visual in friend.GetComponentsInChildren<Renderer>())
+                        if (visual.enabled && visual.GetComponentInParent<Canvas>() == null)
+                            distance = Mathf.Min(distance, Vector3.Distance(playerCenter,
+                                visual.bounds.ClosestPoint(playerCenter)));
+                if (distance <= Mathf.Max(.3f, sitNearFriendsDistance))
+                { nearFriend = true; break; }
+            }
+            if (nearFriend && Time.timeScale > 0) break;
             yield return null;
         }
         SetObjective("");
@@ -626,7 +1054,7 @@ public partial class StoryCutsceneDirector
             Vector3 savedFeet = resumeState.hasPlayerPosition
                 ? resumeState.playerPosition - Vector3.up * PlayerFeetOffset : aisleFeet;
             TeleportPlayer(savedFeet, resumeState.playerRotation * Vector3.forward);
-            if (checkpoint == "lastStop") StandFriendsAfterCrash();
+            if (checkpoint == "lastStop") KeepFriendsSeatedAfterCrash();
             else
             {
                 exploringFirstPerson = true;
@@ -669,6 +1097,7 @@ public partial class StoryCutsceneDirector
             foreach (var boy in friends.Values) if (boy != null) boy.gameObject.SetActive(false);
             SetCamera(schoolExit.position + schoolExit.TransformDirection(schoolEstablishingCameraOffset),
                 schoolExit.position + Vector3.up * schoolEstablishingLookHeight, true);
+            if (showOpeningChapter) yield return ShowChapterIntro(1);
             yield return FadeTo(0, openingFadeInSeconds);
             yield return WaitUnpaused(openingSchoolHoldSeconds);
             FollowGroup();
@@ -721,9 +1150,7 @@ public partial class StoryCutsceneDirector
         ShowLastBus();
         PlaceFriends(1, stop);
         PlayAmbience(streetAmbience);
-        Vector3 waitingPlayerFeet = stop -
-            (waitingShelterAnchor != null ? waitingShelterAnchor.right : existingBus.right) * schoolRowSpacing;
-        waitingPlayerFeet.y = WaitingGroundHeight(waitingPlayerFeet);
+        Vector3 waitingPlayerFeet = WaitingBoyFeet(0);
         TeleportPlayer(waitingPlayerFeet, doorOutside - waitingPlayerFeet);
         FollowArrivingBus(true);
         OpeningCheckpoint = "busStop";
@@ -764,6 +1191,12 @@ public partial class StoryCutsceneDirector
 
     IEnumerator RunSeatedSequence(bool alreadySeated)
     {
+        if (!alreadySeated && playerController != null && playerController.enabled)
+        {
+            Vector3 feet = existingPlayer.position;
+            feet.y = playerController.bounds.min.y;
+            lastWalkableBusLocal = existingBus.InverseTransformPoint(feet);
+        }
         if (!alreadySeated)
         {
             SetPlayerControl(false);
@@ -772,13 +1205,20 @@ public partial class StoryCutsceneDirector
         }
         hasSatDown = true;
         seatedDialogueCamera = true;
+        seatedLookTarget = null;
+        holdSeatedView = false;
         OpeningCheckpoint = "seated";
         PlayAmbience(busInteriorAmbience);
-        TeleportPlayer(BackSeatFeet(0) + Vector3.up * seatedPlayerHeight, existingBus.forward);
+        TeleportPlayer(BackSeatFeet(0), -existingBus.right);
+        // Seated characters are staged, not simulated against the seat collider.
+        playerController.enabled = false;
+        gameCamera.transform.localPosition = playableCameraLocal;
         SeatFriends(true);
         if (friends.TryGetValue("Ethan", out var seatedPlayer)) seatedPlayer.gameObject.SetActive(false);
-        storyCamera.fieldOfView = seatedShotFieldOfView;
-        SetCamera(existingBus.TransformPoint(seatedCameraLocal), SeatedForwardLook(), true);
+        // Keep the seated dialogue and crash in the actual Player camera.
+        cinematicCamera = false;
+        storyCamera.enabled = false;
+        gameCamera.enabled = true;
         if (!alreadySeated) yield return FadeTo(0, seatingFadeInSeconds);
         SetObjective("");
         if (seatedShotHoldSeconds > 0) yield return WaitUnpaused(seatedShotHoldSeconds);
@@ -791,6 +1231,25 @@ public partial class StoryCutsceneDirector
         yield return SpeakScene(2);
         // Let the final sleep line finish, then hide the entire transition before impact.
         SetObjective("");
+        // Finish looking forward before closing the eyes, even when the last
+        // reply held the view on a friend or the pre-fade pause is set to zero.
+        holdSeatedView = true;
+        seatedLookTarget = null;
+        Quaternion sleepStartRotation = gameCamera.transform.rotation;
+        Quaternion sleepForwardRotation = Quaternion.LookRotation(
+            Vector3.ProjectOnPlane(-existingBus.right, Vector3.up).normalized, Vector3.up);
+        float lookDuration = Mathf.Max(.1f, sleepLookForwardSeconds);
+        for (float elapsed = 0; elapsed < lookDuration;)
+        {
+            if (Time.timeScale > 0)
+            {
+                elapsed += Time.unscaledDeltaTime;
+                gameCamera.transform.rotation = Quaternion.Slerp(sleepStartRotation,
+                    sleepForwardRotation, Mathf.SmoothStep(0, 1, elapsed / lookDuration));
+            }
+            yield return null;
+        }
+        gameCamera.transform.rotation = sleepForwardRotation;
         if (sleepBeforeFadeSeconds > 0) yield return WaitUnpaused(sleepBeforeFadeSeconds);
         yield return FadeTo(1, crashFadeOutSeconds);
         yield return WaitUnpaused(sleepToCrashBlackHoldSeconds);
@@ -802,16 +1261,18 @@ public partial class StoryCutsceneDirector
         OpeningCheckpoint = "lastStop";
         existingDriver.gameObject.SetActive(false);
         ActivateSceneGlasses();
-        StandFriendsAfterCrash();
-        TeleportPlayer(existingBus.TransformPoint(new Vector3(.16f, busAisleLocal.y, 0)), -existingBus.right);
-        seatedDialogueCamera = false;
+        KeepFriendsSeatedAfterCrash();
+        gameCamera.transform.localPosition = playableCameraLocal;
+        seatedDialogueCamera = true;
+        holdSeatedView = false;
+        seatedLookTarget = null;
         exploringFirstPerson = true;
         cinematicCamera = false; storyCamera.enabled = false; gameCamera.enabled = true;
         SetPlayerControl(false);
         BuildLastStop(); ApplyAtmosphere(true);
-        crashShakeUntil = Time.unscaledTime + crashShakeSeconds;
-        yield return FadeTo(0, crashFadeInSeconds);
-        SetPlayerControl(true);
+        crashShakeUntil = Time.unscaledTime + dramaticCrashSeconds;
+        yield return FadeTo(0, Mathf.Max(2f, crashFadeInSeconds));
+        yield return WaitUnpaused(crashRecoveryPause);
         yield return ContinueLastStop(false);
     }
 
@@ -819,7 +1280,29 @@ public partial class StoryCutsceneDirector
     {
         OpeningCheckpoint = "lastStop";
         if (!resumed)
+        {
+            SetPlayerControl(false);
             yield return SpeakScene(3);
+            investigationLookLocked = false;
+            investigationLookAtGlasses = false;
+            // Stay in the seat until the player deliberately stands up.
+            // Require a fresh press: a held sprint key must not skip this beat.
+            holdSeatedView = true;
+            playerController.enabled = false;
+            SetObjective("Druk op Shift om op te staan.");
+            yield return null;
+            while (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift))
+                yield return null;
+            while (Time.timeScale <= 0 ||
+                !(Input.GetKeyDown(KeyCode.LeftShift) || Input.GetKeyDown(KeyCode.RightShift)))
+                yield return null;
+            SetObjective("");
+            while (!TryStandInBusAisle())
+            {
+                SetObjective("Geen vrije staplek: plaats Post Crash Stand Point in het gangpad.");
+                yield return null;
+            }
+        }
         seatedDialogueCamera = false;
         exploringFirstPerson = true;
         cinematicCamera = false;
@@ -830,9 +1313,35 @@ public partial class StoryCutsceneDirector
         {
             SetObjective("Kijk voorin de bus naar de chauffeursstoel.");
             yield return WaitForDriverSeat();
-            driverSeatFound = true;
+            SetPlayerControl(false);
             SetObjective("");
+            // Friends join the investigation in the aisle, rather than talking
+            // through rows of seat backs from the rear of the bus.
+            for (int i = 1; i <= 2; i++)
+            {
+                if (!friends.TryGetValue(BoyRoles[i], out var friend) || friend == null) continue;
+                seatedSpriteActors.Remove(friend);
+                if (directionalSprites.TryGetValue(friend, out var poses)) friend.GetComponent<SpriteRenderer>().sprite = poses[0];
+                Vector3 feet = existingPlayer.position + existingBus.right * (i == 1 ? 1.0f : 1.7f)
+                    + existingBus.forward * (i == 1 ? -.2f : .2f);
+                feet.y = playerController.bounds.min.y;
+                friend.position = feet;
+                var visual = friend.GetComponentInChildren<Renderer>();
+                if (visual != null) friend.position += Vector3.up * (feet.y - visual.bounds.min.y);
+            }
+            seatedDialogueCamera = true;
+            holdSeatedView = true;
             yield return SpeakScene(4);
+            investigationLookLocked = false;
+            investigationLookAtGlasses = false;
+            seatedDialogueCamera = false;
+            seatedLookTarget = null;
+            driverSeatFound = true;
+            // Preserve the locked view when mouse control resumes, without a snap.
+            Vector3 viewAngles = gameCamera.transform.eulerAngles;
+            existingPlayer.rotation = Quaternion.Euler(0, viewAngles.y, 0);
+            playerLook.SetPitch(Mathf.DeltaAngle(0, viewAngles.x));
+            SetPlayerControl(true);
         }
         if (!glassesCollected)
         {
@@ -856,7 +1365,7 @@ public partial class StoryCutsceneDirector
         Vector3 exit = doorOutside;
         while (Vector3.Distance(existingPlayer.position, exit + Vector3.up * PlayerFeetOffset) > 1.7f)
         {
-            FollowFriendsNearPlayer();
+            // Friends remain seated until the exterior transition places the group outside.
             yield return null;
         }
         yield return FadeTo(1);
@@ -871,6 +1380,22 @@ public partial class StoryCutsceneDirector
 
     IEnumerator ExploreLaterScenes(int firstScene, bool resumeAtScene)
     {
+        if (firstScene <= 7)
+        {
+            // Stop at the playable cabin until its ranger/dog interactions exist.
+            // Do not auto-play the remaining chapters against placeholder scenery.
+            for(int scene=Mathf.Max(5,firstScene);scene<=7 && scene<shots.Length;scene++)
+            {
+                if(scene==6 && !(resumeAtScene && scene==firstScene))
+                { SetPlayerControl(false); yield return ShowChapterIntro(2); }
+                SetPlayerControl(false); seatedDialogueCamera=true; holdSeatedView=true;
+                yield return SpeakScene(scene);
+                seatedDialogueCamera=false;
+            }
+            SetPlayerControl(true); SetObjective("Verken het huis van de boswachter.");
+            while(IsPlaying) { FollowFriendsNearPlayer(); yield return null; }
+            yield break;
+        }
         for (int i = firstScene; i < shots.Length; i++)
         {
             if (i > 5 && !(resumeAtScene && i == firstScene))
@@ -901,6 +1426,19 @@ public partial class StoryCutsceneDirector
 
     void FollowFriendsNearPlayer()
     {
+        if (IsDialogueLinePlaying || playerMovement == null || !playerMovement.enabled) return;
+        // Use the authored standing scale for both meshes and future billboard sprites.
+        foreach (string role in new[] { "Lucas", "Noah" })
+        {
+            if (!friends.TryGetValue(role, out var actor) || actor == null ||
+                !standingScales.TryGetValue(role, out var standing)) continue;
+            var visual = actor.GetComponentInChildren<Renderer>();
+            float feet = visual != null ? visual.bounds.min.y : actor.position.y;
+            Vector3 targetScale = standing;
+            targetScale.y *= playerMovement.IsCrouching ? playerMovement.crouchFraction : 1f;
+            actor.localScale = Vector3.Lerp(actor.localScale, targetScale, 1f - Mathf.Exp(-12f * Time.deltaTime));
+            if (visual != null) actor.position += Vector3.up * (feet - visual.bounds.min.y);
+        }
         Vector3 playerFeet = existingPlayer.position - Vector3.up * PlayerFeetOffset;
         if (!companionFollowReady)
         {
@@ -949,7 +1487,7 @@ public partial class StoryCutsceneDirector
             {
                 friendFollowVelocity.TryGetValue(name, out Vector3 velocity);
                 Vector3 next = Vector3.SmoothDamp(friend.position, target, ref velocity,
-                    .3f, friendWalkSpeed, Time.deltaTime);
+                    .3f, playerMovement.CurrentMoveSpeed, Time.deltaTime);
                 Vector3 fromPlayer = next - playerFeet;
                 fromPlayer.y = 0;
                 if (fromPlayer.magnitude < 1.15f)
@@ -993,6 +1531,11 @@ public partial class StoryCutsceneDirector
 
     void CleanupFirstPerson()
     {
+        bobPreviousPosition.Clear(); bobPhase.Clear(); bobOffset.Clear();
+        directionalSprites.Clear(); spriteLastPositions.Clear(); spriteHeadings.Clear(); seatedSpriteActors.Clear();
+        if (originalPlayerVisual != null) originalPlayerVisual.enabled = originalPlayerVisualEnabled;
+        foreach (var sprite in winterSprites) if (sprite != null) Destroy(sprite);
+        winterSprites.Clear();
         if (glassesPickup != null) glassesPickup.Collected -= OnGlassesCollected;
         foreach (var visual in spawnedVisuals) if (visual != null) Destroy(visual);
         spawnedVisuals.Clear(); friends.Clear();

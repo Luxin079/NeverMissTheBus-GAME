@@ -26,27 +26,27 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 2479830612175454819, guid: b225a326beac9504a949e3daae6cede3, type: 3}
       propertyPath: m_Size.x
-      value: 7.3901057
+      value: 9.301115
       objectReference: {fileID: 0}
     - target: {fileID: 2479830612175454819, guid: b225a326beac9504a949e3daae6cede3, type: 3}
       propertyPath: m_Size.y
-      value: 3.4970355
+      value: 8.938865
       objectReference: {fileID: 0}
     - target: {fileID: 2479830612175454819, guid: b225a326beac9504a949e3daae6cede3, type: 3}
       propertyPath: m_Size.z
-      value: 0.5101929
+      value: 1.2981529
       objectReference: {fileID: 0}
     - target: {fileID: 2479830612175454819, guid: b225a326beac9504a949e3daae6cede3, type: 3}
       propertyPath: m_Center.x
-      value: 0.016313195
+      value: 0.9718174
       objectReference: {fileID: 0}
     - target: {fileID: 2479830612175454819, guid: b225a326beac9504a949e3daae6cede3, type: 3}
       propertyPath: m_Center.y
-      value: 0.45706034
+      value: 3.1779745
       objectReference: {fileID: 0}
     - target: {fileID: 2479830612175454819, guid: b225a326beac9504a949e3daae6cede3, type: 3}
       propertyPath: m_Center.z
-      value: 0.0030326843
+      value: -0.0732975
       objectReference: {fileID: 0}
     - target: {fileID: 2631341549551489686, guid: b225a326beac9504a949e3daae6cede3, type: 3}
       propertyPath: m_Sprite
