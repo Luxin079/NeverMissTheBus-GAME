@@ -91,7 +91,13 @@ public partial class StoryCutsceneDirector
                 if (character) continue;
                 if (hit.point.y > groundY) groundY = hit.point.y;
             }
-            if (!float.IsNegativeInfinity(groundY)) actor.position += Vector3.up * (groundY + actorGroundClearance - feet.y);
+            if (!float.IsNegativeInfinity(groundY))
+            {
+                float correction = groundY + actorGroundClearance - feet.y;
+                // Never sink into a step. Ease down from it instead of dropping instantly.
+                actor.position += Vector3.up * (correction >= 0 ? correction :
+                    Mathf.Max(correction, -2f * Time.deltaTime));
+            }
         }
     }
 
@@ -108,7 +114,8 @@ public partial class StoryCutsceneDirector
             bobPhase.TryGetValue(actor, out float phase);
             bobOffset.TryGetValue(actor, out float offset);
             // Ignore staging teleports and animate only actual horizontal travel.
-            bool moving = actor.gameObject.activeInHierarchy && distance > .0005f && distance < .5f;
+            bool moving = actor.gameObject.activeInHierarchy && !seatedSpriteActors.Contains(actor)
+                && !IsDialogueLinePlaying && distance > .0005f && distance < .5f;
             if (moving) phase = Mathf.Repeat(phase + distance / Mathf.Max(.2f, walkBobStride) * Mathf.PI * 2, Mathf.PI * 2);
             float target = moving ? (1 - Mathf.Cos(phase)) * .5f * walkBobHeight : 0;
             offset = Mathf.MoveTowards(offset, target, Time.deltaTime * .3f);
@@ -821,6 +828,16 @@ public partial class StoryCutsceneDirector
 
     IEnumerator WalkSchoolRow()
     {
+        // Imported school meshes may have no collision, so the terrain below
+        // was being selected even when a visible porch was above it.
+        if (schoolExit.parent != null)
+            foreach (var mesh in schoolExit.parent.GetComponentsInChildren<MeshFilter>())
+                if (mesh.sharedMesh != null && mesh.GetComponent<Collider>() == null)
+                {
+                    var surface = mesh.gameObject.AddComponent<MeshCollider>();
+                    surface.sharedMesh = mesh.sharedMesh;
+                }
+        Physics.SyncTransforms();
         string[] names = { "Ethan", "Lucas", "Noah" };
         Transform[] boys = new Transform[names.Length];
         Vector3[] doorway = new Vector3[names.Length];
@@ -1479,7 +1496,7 @@ public partial class StoryCutsceneDirector
             }
             float floorY;
             if (insideBus) floorY = existingBus.TransformPoint(busAisleLocal).y;
-            else if (!TryWalkableGroundHeight(target, out floorY)) continue;
+            else if (!TryWalkableGroundHeight(friend.position, out floorY)) continue;
             var renderer = friend.GetComponentInChildren<Renderer>();
             target.y = floorY + actorGroundClearance +
                 (renderer != null ? friend.position.y - renderer.bounds.min.y : 0);
@@ -1490,8 +1507,22 @@ public partial class StoryCutsceneDirector
                     .3f, playerMovement.CurrentMoveSpeed, Time.deltaTime);
                 Vector3 fromPlayer = next - playerFeet;
                 fromPlayer.y = 0;
-                if (fromPlayer.magnitude < 1.15f)
-                    next -= lastFollowDirection * (1.15f - fromPlayer.magnitude);
+                if (fromPlayer.magnitude < 1.15f) next = friend.position;
+                // Grounding owns vertical movement; a distant target must not
+                // pull companions through slopes or lift them over obstacles.
+                next.y = friend.position.y;
+                Vector3 step = next - friend.position;
+                float feetY = renderer != null ? renderer.bounds.min.y : friend.position.y;
+                Vector3 obstacleProbe = new Vector3(friend.position.x, feetY + .5f, friend.position.z);
+                foreach (var hit in Physics.SphereCastAll(obstacleProbe, .15f, step.normalized,
+                    step.magnitude, ~0, QueryTriggerInteraction.Ignore))
+                {
+                    if (hit.transform.IsChildOf(friend) || hit.transform.IsChildOf(existingPlayer)) continue;
+                    if (hit.normal.y > .7f) continue;
+                    next = friend.position;
+                    velocity = Vector3.zero;
+                    break;
+                }
                 friend.position = next;
                 friendFollowVelocity[name] = velocity;
             }

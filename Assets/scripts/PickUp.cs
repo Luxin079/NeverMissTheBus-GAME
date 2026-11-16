@@ -15,6 +15,7 @@ public class PickUp : MonoBehaviour
     [Range(0, 1)] public float pickupVolume = .8f;
     [Header("Pickup settings")]
     [Range(.5f, 10)] public float pickupRange = 3;
+    [Range(5, 60)] public float pickupViewAngle = 35;
 
     public event Action<PickUp> Collected;
     GameObject player;
@@ -49,11 +50,28 @@ public class PickUp : MonoBehaviour
         // from the player's camera to the item artwork, not the prefab pivot/UI.
         var view = player != null ? player.GetComponentInChildren<Camera>(true) : null;
         Vector3 origin = view != null ? view.transform.position : player != null ? player.transform.position : Vector3.zero;
-        var artwork = GetComponentInChildren<SpriteRenderer>();
+        Renderer artwork = GetComponentInChildren<SpriteRenderer>();
+        if (artwork == null) artwork = GetComponentInChildren<MeshRenderer>();
         Vector3 target = artwork != null ? artwork.bounds.ClosestPoint(origin) : transform.position;
-        bool inRange = player != null && (origin - target).sqrMagnitude <= pickupRange * pickupRange;
+        float reach = itemTag == "BrokenGlasses" ? Mathf.Min(pickupRange, 2f) : pickupRange;
+        bool inRange = player != null && (origin - target).sqrMagnitude <= reach * reach;
         playerInRange = inRange;
-        if (inRange && Input.GetKeyDown(KeyCode.E)) PickUpItem();
+        bool visible = view != null && view.isActiveAndEnabled && artwork != null && artwork.enabled;
+        Vector3 aim = artwork != null ? artwork.bounds.center : target;
+        if (visible)
+        {
+            Vector3 viewport = view.WorldToViewportPoint(aim);
+            visible = viewport.z > 0 && viewport.x > 0 && viewport.x < 1 && viewport.y > 0 && viewport.y < 1
+                && Vector3.Angle(view.transform.forward, aim - origin) <= pickupViewAngle;
+            foreach (var hit in Physics.RaycastAll(origin, (aim - origin).normalized,
+                Vector3.Distance(origin, aim), ~0, QueryTriggerInteraction.Ignore))
+            {
+                if (hit.transform.IsChildOf(transform) || hit.transform.IsChildOf(player.transform)) continue;
+                visible = false;
+                break;
+            }
+        }
+        if (inRange && visible && Input.GetKeyDown(KeyCode.E)) PickUpItem();
     }
 
     void PickUpItem()
