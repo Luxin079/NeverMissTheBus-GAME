@@ -121,6 +121,13 @@ public partial class StoryCutsceneDirector : MonoBehaviour
     public bool IsPlaying { get; private set; }
     public bool IsDialogueLinePlaying { get; private set; }
     public bool IsScreenFaded => fade != null && fade.alpha > .02f;
+    public bool HasActiveObjective => !string.IsNullOrWhiteSpace(currentObjective);
+    public bool IsFirstPersonGameplayActive => IsPlaying && !cinematicCamera &&
+        !seatedDialogueCamera && !investigationLookLocked && chapterOverlay == null &&
+        !IsDialogueLinePlaying && !IsScreenFaded &&
+        gameCamera != null && gameCamera.enabled &&
+        playerMovement != null && playerMovement.isActiveAndEnabled &&
+        playerLook != null && playerLook.isActiveAndEnabled && Time.timeScale > 0;
     public int CurrentScene { get; private set; }
     public string OpeningCheckpoint { get; private set; } = "school";
     GameSaveState resumeState;
@@ -131,7 +138,10 @@ public partial class StoryCutsceneDirector : MonoBehaviour
     Camera gameCamera, storyCamera;
     Canvas canvas;
     CanvasGroup fade;
-    TMP_Text subtitle, hint;
+    RectTransform dialoguePanel, objectivePanel;
+    CanvasGroup objectiveGroup;
+    TMP_Text subtitle, hint, objectiveText;
+    string currentObjective = "";
     Coroutine playback;
     CursorLockMode oldLock;
     bool oldCursor, advance;
@@ -215,6 +225,8 @@ public partial class StoryCutsceneDirector : MonoBehaviour
         if (!IsPlaying) return;
         IsPlaying=false;
         IsDialogueLinePlaying=false;
+        currentObjective="";
+        UpdateStoryUIVisibility();
         if (chapterOverlay != null) Destroy(chapterOverlay);
         CleanupFirstPerson();
         RestoreBusSequence();
@@ -292,10 +304,11 @@ public partial class StoryCutsceneDirector : MonoBehaviour
     }
     IEnumerator Say(string who,string words,bool focusSpeaker=true)
     {
+        if (string.IsNullOrWhiteSpace(words)) yield break;
         bool restoreMovement = playerMovement != null && playerMovement.enabled;
         if (restoreMovement) playerMovement.enabled = false;
         IsDialogueLinePlaying=true;
-        subtitle.transform.parent.gameObject.SetActive(true);
+        UpdateStoryUIVisibility();
         subtitle.text=DisplayName(ActorRole(who))+": "+words; subtitle.maxVisibleCharacters=0; subtitle.ForceMeshUpdate(); hint.text="";
         if (focusSpeaker && !FocusInvestigationLine(words)) FocusSpeaker(who);
         int length=subtitle.textInfo.characterCount;
@@ -307,7 +320,9 @@ public partial class StoryCutsceneDirector : MonoBehaviour
         advance=false; hint.text="";
         if(dialogueAudio!=null && advanceBlip!=null) dialogueAudio.PlayOneShot(advanceBlip,.25f);
         IsDialogueLinePlaying=false;
+        subtitle.text="";
         if (restoreMovement && playerMovement != null) playerMovement.enabled = true;
+        UpdateStoryUIVisibility();
     }
     IEnumerator SpeakScene(int index)
     {
@@ -328,8 +343,20 @@ public partial class StoryCutsceneDirector : MonoBehaviour
     }
     void SetObjective(string text)
     {
-        subtitle.transform.parent.gameObject.SetActive(text.Length>0);
-        subtitle.text=text; subtitle.maxVisibleCharacters=int.MaxValue; hint.text="";
+        currentObjective=text == null ? "" : text.Trim();
+        if (objectiveText != null) objectiveText.text=currentObjective;
+        UpdateStoryUIVisibility();
+    }
+    void UpdateStoryUIVisibility()
+    {
+        if (dialoguePanel != null)
+            dialoguePanel.gameObject.SetActive(IsDialogueLinePlaying);
+
+        bool showObjective=IsPlaying && HasActiveObjective && !IsDialogueLinePlaying &&
+            !IsScreenFaded && chapterOverlay == null && Time.timeScale > 0;
+        if (objectivePanel != null && objectivePanel.gameObject.activeSelf != showObjective)
+            objectivePanel.gameObject.SetActive(showObjective);
+        if (objectiveGroup != null) objectiveGroup.alpha=showObjective ? 1 : 0;
     }
     void BuildUI()
     {
@@ -337,14 +364,30 @@ public partial class StoryCutsceneDirector : MonoBehaviour
         canvas.renderMode=RenderMode.ScreenSpaceOverlay; canvas.sortingOrder=300;
         var scaler=canvas.gameObject.AddComponent<CanvasScaler>(); scaler.uiScaleMode=CanvasScaler.ScaleMode.ScaleWithScreenSize;
         scaler.referenceResolution=new Vector2(1920,1080);
-        var panel=UIRect("Dialogue background",canvas.transform,new Vector2(.08f,.035f),new Vector2(.92f,.20f));
-        var background=panel.gameObject.AddComponent<Image>(); background.color=new Color(.015f,.02f,.03f,.91f);
-        subtitle=UIRect("Name and dialogue",panel,new Vector2(.03f,.15f),new Vector2(.96f,.93f)).gameObject.AddComponent<TextMeshProUGUI>();
+        dialoguePanel=UIRect("Dialogue background",canvas.transform,new Vector2(.08f,.035f),new Vector2(.92f,.20f));
+        var background=dialoguePanel.gameObject.AddComponent<Image>(); background.color=new Color(.015f,.02f,.03f,.91f);
+        subtitle=UIRect("Name and dialogue",dialoguePanel,new Vector2(.03f,.15f),new Vector2(.96f,.93f)).gameObject.AddComponent<TextMeshProUGUI>();
         subtitle.fontSize=31; subtitle.enableAutoSizing=true; subtitle.fontSizeMin=20; subtitle.fontSizeMax=31;
         subtitle.color=new Color(.95f,.94f,.87f); subtitle.raycastTarget=false;
-        hint=UIRect("Continue",panel,new Vector2(.88f,.02f),new Vector2(.98f,.22f)).gameObject.AddComponent<TextMeshProUGUI>();
+        hint=UIRect("Continue",dialoguePanel,new Vector2(.88f,.02f),new Vector2(.98f,.22f)).gameObject.AddComponent<TextMeshProUGUI>();
         hint.fontSize=20; hint.alignment=TextAlignmentOptions.Right; hint.raycastTarget=false;
-        panel.gameObject.SetActive(false);
+        dialoguePanel.gameObject.SetActive(false);
+
+        objectivePanel=UIRect("Current objective",canvas.transform,new Vector2(.68f,.82f),new Vector2(.965f,.955f));
+        objectiveGroup=objectivePanel.gameObject.AddComponent<CanvasGroup>();
+        objectiveGroup.blocksRaycasts=false; objectiveGroup.interactable=false;
+        var objectiveBackground=objectivePanel.gameObject.AddComponent<Image>();
+        objectiveBackground.color=new Color(.015f,.02f,.03f,.88f);
+        var marker=UIRect("Objective marker",objectivePanel,new Vector2(.035f,.18f),new Vector2(.18f,.82f));
+        marker.gameObject.AddComponent<Image>().color=new Color(.78f,.16f,.10f,.95f);
+        var markerText=UIRect("Exclamation mark",marker,Vector2.zero,Vector2.one).gameObject.AddComponent<TextMeshProUGUI>();
+        markerText.text="!"; markerText.fontSize=42; markerText.fontStyle=FontStyles.Bold;
+        markerText.alignment=TextAlignmentOptions.Center; markerText.color=Color.white; markerText.raycastTarget=false;
+        objectiveText=UIRect("Objective text",objectivePanel,new Vector2(.22f,.14f),new Vector2(.96f,.86f)).gameObject.AddComponent<TextMeshProUGUI>();
+        objectiveText.fontSize=27; objectiveText.enableAutoSizing=true; objectiveText.fontSizeMin=18; objectiveText.fontSizeMax=27;
+        objectiveText.alignment=TextAlignmentOptions.MidlineLeft; objectiveText.color=new Color(.95f,.94f,.87f);
+        objectiveText.raycastTarget=false; objectiveText.text="";
+        objectivePanel.gameObject.SetActive(false);
         var black=UIRect("Black fade",canvas.transform,Vector2.zero,Vector2.one).gameObject.AddComponent<Image>(); black.color=Color.black;
         fade=black.gameObject.AddComponent<CanvasGroup>(); fade.alpha=0; fade.blocksRaycasts=false;
         canvas.gameObject.SetActive(false);

@@ -1,16 +1,16 @@
 using UnityEngine;
 
-/// <summary>Shows an existing crosshair Canvas only while this Player is controllable.</summary>
+/// <summary>Shows the crosshair only during playable first-person objectives.</summary>
 public class PlayerCrosshair : MonoBehaviour
 {
     [Header("Existing crosshair UI")]
-    [Tooltip("Drag the Canvas that already contains your crosshair here. This script does not create UI.")]
+    [Tooltip("Drag the Canvas that already contains your crosshair here. It is hidden during dialogue, cutscenes and moments without an objective.")]
     public Canvas crosshairCanvas;
 
     PlayerMovement movement;
     MouseLook mouseLook;
     StoryCutsceneDirector story;
-    bool storyAllowsControl = true;
+    bool storyAllowsControl;
 
     public Canvas CrosshairCanvas { get { ResolveCanvas(); return crosshairCanvas; } }
 
@@ -33,7 +33,7 @@ public class PlayerCrosshair : MonoBehaviour
             crosshairCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
             crosshairCanvas.overrideSorting = true;
             crosshairCanvas.sortingOrder = 200;
-            crosshairCanvas.enabled = false;
+            SetVisible(false);
         }
     }
 
@@ -43,25 +43,29 @@ public class PlayerCrosshair : MonoBehaviour
         if (crosshairCanvas == null) return;
         if (story == null) story = FindFirstObjectByType<StoryCutsceneDirector>();
 
-        bool visible = storyAllowsControl && Time.timeScale > 0 &&
+        bool visible = storyAllowsControl && story != null &&
+            story.HasActiveObjective && story.IsFirstPersonGameplayActive &&
             movement != null && movement.isActiveAndEnabled &&
             mouseLook != null && mouseLook.isActiveAndEnabled &&
             (DialogueManager.Instance == null || !DialogueManager.Instance.isActiveAndEnabled ||
-             !DialogueManager.Instance.IsDialogueActive) &&
-            (story == null || !story.IsPlaying ||
-             (!story.IsDialogueLinePlaying && !story.IsScreenFaded));
-        if (visible && !crosshairCanvas.gameObject.activeSelf) crosshairCanvas.gameObject.SetActive(true);
-        if (crosshairCanvas.enabled != visible) crosshairCanvas.enabled = visible;
+             !DialogueManager.Instance.IsDialogueActive);
+        SetVisible(visible);
     }
 
     public void SetStoryControl(bool allowed)
     {
         storyAllowsControl = allowed;
-        if (!allowed && crosshairCanvas != null) crosshairCanvas.enabled = false;
+        if (!allowed) SetVisible(false);
     }
 
-    void OnDisable()
+    void SetVisible(bool visible)
     {
-        if (crosshairCanvas != null) crosshairCanvas.enabled = false;
+        if (crosshairCanvas == null) return;
+        crosshairCanvas.enabled = visible;
+        var crosshair = crosshairCanvas.gameObject;
+        if (crosshair != gameObject && crosshair.activeSelf != visible)
+            crosshair.SetActive(visible);
     }
+
+    void OnDisable() => SetVisible(false);
 }

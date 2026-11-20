@@ -128,20 +128,20 @@ public partial class StoryCutsceneDirector
     {
         Vector3 target; string objective;
         if(scene==5 && action.Contains("walk through the village"))
-        { target=RouteGround(Vector3.Lerp(doorOutside,routeSign,.45f)); objective="Zoek met je vrienden hulp in het dorp."; }
+        { target=RouteGround(Vector3.Lerp(doorOutside,routeSign,.45f)); objective="Search the village for help with your friends."; }
         else if(scene==5 && action.Contains("edge of the village"))
-        { target=routeSign; objective="Loop naar het bord bij de bosrand."; }
+        { target=routeSign; objective="Walk to the sign at the edge of the forest."; }
         else if(scene==5 && action.Contains("closer to the sign"))
-        { target=routeSign; objective="Bekijk het bord van de boswachter."; }
+        { target=routeSign; objective="Read the forest ranger's sign."; }
         else if(scene==6 && action.Contains("walk into the forest"))
-        { target=routeMiddle; objective="Volg het pad het bos in."; }
+        { target=routeMiddle; objective="Follow the path into the forest."; }
         else if(scene==6 && action.Contains("deeper into the forest"))
-        { target=RouteGround(Vector3.Lerp(routeMiddle,routeHouse,.65f)); objective="Volg het bospad naar het huis."; }
+        { target=RouteGround(Vector3.Lerp(routeMiddle,routeHouse,.65f)); objective="Follow the forest path to the house."; }
         else if(scene==6 && action.Contains("walk toward it"))
-        { target=routeHouse; objective="Loop naar het huis van de boswachter."; }
+        { target=routeHouse; objective="Walk to the forest ranger's house."; }
         else if(scene==7 && action.Contains("opens the door"))
         {
-            seatedDialogueCamera=false; SetPlayerControl(true); SetObjective("Druk op E om de deur te openen.");
+            seatedDialogueCamera=false; SetPlayerControl(true); SetObjective("Press E to open the door.");
             while(Time.timeScale<=0 || !Input.GetKeyDown(KeyCode.E)) yield return null;
             if(!rangerDoorOpened)
             {
@@ -152,7 +152,7 @@ public partial class StoryCutsceneDirector
             SetPlayerControl(false); seatedDialogueCamera=true;holdSeatedView=true;SetObjective("");yield break;
         }
         else if(scene==7 && action.Contains("enter the house"))
-        { target=routeHouse+(routeHouse-routeSign).normalized*2.2f; objective="Ga voorzichtig naar binnen."; }
+        { target=routeHouse+(routeHouse-routeSign).normalized*2.2f; objective="Enter the house carefully."; }
         else yield break;
         seatedDialogueCamera=false;SetPlayerControl(true);SetObjective(objective);
         while(Vector3.ProjectOnPlane(existingPlayer.position-target,Vector3.up).sqrMagnitude>2.25f)

@@ -56,6 +56,8 @@ public class DialogueManager : MonoBehaviour
         currentDialogue = dialogue;
         currentIndex = 0;
 
+        characterNameText.text = "";
+        dialogueText.text = "";
         dialoguePanel.SetActive(true);
 
         ShowLine();
@@ -103,6 +105,18 @@ public class DialogueManager : MonoBehaviour
 
     void EndDialogue()
     {
-        dialoguePanel.SetActive(false);
+        if (typingRoutine != null)
+        {
+            StopCoroutine(typingRoutine);
+            typingRoutine = null;
+        }
+        isTyping = false;
+        currentDialogue = null;
+        currentIndex = 0;
+        if (characterNameText != null) characterNameText.text = "";
+        if (dialogueText != null) dialogueText.text = "";
+        if (dialoguePanel != null) dialoguePanel.SetActive(false);
     }
+
+    void OnDisable() => EndDialogue();
 }
