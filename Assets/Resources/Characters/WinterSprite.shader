@@ -23,6 +23,7 @@ Shader "NeverMissTheBus/WinterSprite"
  float4 _BackTint;
  CBUFFER_END
  float _StoryInteriorDarkness;
+ float _StoryNightDarkness;
  V vert(A a) { V o; float3 world=TransformObjectToWorld(a.positionOS.xyz); world.y+=_WalkBob; o.positionCS=TransformWorldToHClip(world); o.uv=a.uv; return o; }
  half4 frag(V i):SV_Target {
  half4 c=SAMPLE_TEXTURE2D(_MainTex,sampler_MainTex,i.uv); clip(c.a-.5);
@@ -37,6 +38,7 @@ Shader "NeverMissTheBus/WinterSprite"
  c.rgb = lerp(grey.xxx, c.rgb, _BackSaturation) * _BackBrightness * _BackTint.rgb;
  }
  c.rgb *= lerp(1.0,.55,saturate(_StoryInteriorDarkness));
+ c.rgb *= lerp(1.0,.65,saturate(_StoryNightDarkness));
  return c;
  }
  ENDHLSL

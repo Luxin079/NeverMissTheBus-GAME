@@ -27,12 +27,37 @@ public class PromptFade : MonoBehaviour
     private bool playerInside;
 
     private Coroutine fadeRoutine;
+    private PickUp owner;
+
+    public bool IsReadable(Camera view)
+    {
+        if (!isActiveAndEnabled || uiContainer == null || !uiContainer.activeInHierarchy ||
+            view == null || GetCurrentAlpha() < .8f) return false;
+        foreach (var text in uiContainer.GetComponentsInChildren<TMPro.TMP_Text>())
+        {
+            if (!text.isActiveAndEnabled || text.color.a < .8f) continue;
+            Vector3 point = text.rectTransform.TransformPoint(text.rectTransform.rect.center);
+            Vector3 screen = view.WorldToViewportPoint(point);
+            if (screen.z <= 0 || screen.x < .03f || screen.x > .97f || screen.y < .03f || screen.y > .97f) continue;
+            bool blocked = false;
+            foreach (var hit in Physics.RaycastAll(view.transform.position, point-view.transform.position,
+                Vector3.Distance(point,view.transform.position), ~0, QueryTriggerInteraction.Ignore))
+            {
+                if (owner != null && hit.transform.IsChildOf(owner.transform)) continue;
+                if (view.transform.IsChildOf(hit.transform) || hit.transform.GetComponentInParent<PlayerMovement>() != null) continue;
+                blocked = true; break;
+            }
+            if (!blocked) return true;
+        }
+        return false;
+    }
 
     private void Awake()
     {
+        owner = GetComponentInParent<PickUp>();
         if (uiContainer == null)
         {
-            Debug.LogWarning($"{name}: uiContainer not assigned — using this GameObject as container.");
+            Debug.LogWarning($"{name}: uiContainer not assigned â€” using this GameObject as container.");
             uiContainer = gameObject;
         }
 
@@ -67,6 +92,12 @@ public class PromptFade : MonoBehaviour
 
     private void Update()
     {
+        if (owner != null)
+        {
+            bool eligible = owner.isActiveAndEnabled && owner.CanOfferPickup;
+            if (eligible != playerInside) { playerInside = eligible; FadeTo(eligible ? 1 : 0); }
+            return;
+        }
         if (!useOverlapFallback) return;
         if (myCollider == null) return;
 
@@ -98,6 +129,7 @@ public class PromptFade : MonoBehaviour
 
     private void OnTriggerEnter(Collider other)
     {
+        if (owner != null) return;
         // will work when a Rigidbody is present (recommended but not required with overlap fallback)
         if (!other.CompareTag(playerTag)) return;
         FadeTo(1f);
@@ -105,6 +137,7 @@ public class PromptFade : MonoBehaviour
 
     private void OnTriggerExit(Collider other)
     {
+        if (owner != null) return;
         if (!other.CompareTag(playerTag)) return;
         FadeTo(0f);
     }

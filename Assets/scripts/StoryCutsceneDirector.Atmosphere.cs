@@ -42,6 +42,35 @@ public partial class StoryCutsceneDirector
     GameObject rangerDoor;
     bool rangerDoorOpened;
     Vector3 routeSign, routeMiddle, routeHouse;
+    [Header("Separate crash location")]
+    public Vector3 crashLocation = new Vector3(1800, 0, 1800);
+    bool crashLocationReady;
+    Vector3 crashLocationDelta;
+    readonly System.Collections.Generic.Dictionary<Light, float> daylightIntensity = new System.Collections.Generic.Dictionary<Light, float>();
+    readonly System.Collections.Generic.Dictionary<Light, LightShadows> daylightShadows = new System.Collections.Generic.Dictionary<Light, LightShadows>();
+
+    void MoveToCrashLocation()
+    {
+        if (crashLocationReady) return;
+        crashLocationReady = true;
+        crashLocationDelta = crashLocation - doorOutside;
+        bool controllerOn = playerController.enabled;
+        playerController.enabled = false;
+        existingBus.position += crashLocationDelta;
+        var movedMarkers = new System.Collections.Generic.HashSet<Transform>();
+        foreach (var marker in new[] { postCrashStandPoint, driverSeatInspectionAnchor, driverSeatLookTarget })
+            if (marker != null && !marker.IsChildOf(existingBus) && movedMarkers.Add(marker))
+                marker.position += crashLocationDelta;
+        if (!existingPlayer.IsChildOf(existingBus)) existingPlayer.position += crashLocationDelta;
+        foreach (var boy in friends.Values)
+            if (boy != null && !boy.IsChildOf(existingBus)) boy.position += crashLocationDelta;
+        doorOutside += crashLocationDelta; doorThreshold += crashLocationDelta;
+        aisleFeet += crashLocationDelta; seatFeet += crashLocationDelta;
+        parkedBusPosition += crashLocationDelta;
+        playerController.enabled = controllerOn;
+        companionRoutes.Clear();
+        Physics.SyncTransforms();
+    }
 
     void UpdateInteriorAtmosphere()
     {
@@ -62,7 +91,7 @@ public partial class StoryCutsceneDirector
             cameraIndoors |= roof && walls >= 2;
         }
         interiorBlend = Mathf.MoveTowards(interiorBlend, cameraIndoors ? 1 : 0, Time.deltaTime / Mathf.Max(.1f, interiorBlendSeconds));
-        RenderSettings.ambientLight = winterAmbient * (arrivedAtLastStop ? .65f : 1f) * Mathf.Lerp(1, interiorAmbientMultiplier, interiorBlend);
+        RenderSettings.ambientLight = winterAmbient * (arrivedAtLastStop ? .35f : 1f) * Mathf.Lerp(1, interiorAmbientMultiplier, interiorBlend);
         Shader.SetGlobalFloat("_StoryInteriorDarkness", interiorBlend);
         if (ambienceSource != null) ambienceSource.volume = ambientVolume * Mathf.Lerp(1, .4f, interiorBlend);
     }
@@ -70,6 +99,7 @@ public partial class StoryCutsceneDirector
     Vector3 RouteGround(Vector3 point)
     {
         if (TryWalkableGroundHeight(point, out float y)) point.y = y;
+        else if (crashLocationReady) point.y = crashLocation.y;
         else if (Terrain.activeTerrain != null)
             point.y = Terrain.activeTerrain.SampleHeight(point) + Terrain.activeTerrain.transform.position.y;
         return point;
@@ -77,8 +107,8 @@ public partial class StoryCutsceneDirector
 
     void BuildForestRoute()
     {
-        routeSign = RouteGround(forestSignPoint != null ? forestSignPoint.position : DestinationForScene(6));
-        routeHouse = RouteGround(rangerHousePoint != null ? rangerHousePoint.position : DestinationForScene(7));
+        routeSign = RouteGround(ForestMarkerPosition(forestSignPoint, 6));
+        routeHouse = RouteGround(ForestMarkerPosition(rangerHousePoint, 7));
         routeMiddle = RouteGround(Vector3.Lerp(routeSign, routeHouse, .5f));
         Vector3 direction = routeHouse-routeSign; direction.y=0; direction.Normalize();
         Vector3 side = Vector3.Cross(Vector3.up, direction);
@@ -117,6 +147,16 @@ public partial class StoryCutsceneDirector
         CabinPart(house.transform,"Front right",new Vector3(2.15f,1.5f,-.4f),new Vector3(2.7f,3,.2f));
         CabinPart(house.transform,"Door",new Vector3(0,1.3f,-.4f),new Vector3(1.5f,2.6f,.15f));
         rangerDoor=house.transform.GetChild(house.transform.childCount-1).gameObject;
+    }
+
+    Vector3 ForestMarkerPosition(Transform marker, int scene)
+    {
+        if (marker == null) return DestinationForScene(scene);
+        Vector3 position = marker.position;
+        // Existing authored city markers retain their offsets at the new stop.
+        if (crashLocationReady && Vector3.Distance(position, crashLocation) > 300)
+            position += crashLocationDelta;
+        return position;
     }
     void CabinPart(Transform house,string name,Vector3 position,Vector3 size)
     {
@@ -263,7 +303,16 @@ public partial class StoryCutsceneDirector
         RenderSettings.fogMode = FogMode.ExponentialSquared;
         RenderSettings.fogDensity = horror ? horrorFogDensity : winterFogDensity;
         RenderSettings.ambientMode = AmbientMode.Flat;
-        RenderSettings.ambientLight = horror ? winterAmbient * .65f : winterAmbient;
+        RenderSettings.ambientLight = horror ? winterAmbient * .35f : winterAmbient;
+        Shader.SetGlobalFloat("_StoryNightDarkness", horror ? 1 : 0);
+        foreach (var light in FindObjectsByType<Light>(FindObjectsSortMode.None))
+        {
+            if (light.type != LightType.Directional) continue;
+            if (!daylightIntensity.ContainsKey(light))
+            { daylightIntensity.Add(light,light.intensity); daylightShadows.Add(light,light.shadows); }
+            light.intensity = horror ? Mathf.Min(daylightIntensity[light]*.2f,.22f) : daylightIntensity[light];
+            light.shadows = horror ? LightShadows.Soft : daylightShadows[light];
+        }
         if (townSource != null)
             foreach (var lamp in townSource.GetComponentsInChildren<Light>(true))
             {
@@ -275,31 +324,69 @@ public partial class StoryCutsceneDirector
         if (volume != null && volume.profile != null && volume.profile.TryGet<ColorAdjustments>(out var adjustment))
         {
             if (!hadPostExposure) { previousPostExposure = adjustment.postExposure.value; hadPostExposure = true; }
-            adjustment.postExposure.value = horror ? -.5f : -.15f;
+            adjustment.postExposure.value = horror ? -1.1f : -.15f;
         }
     }
 
     void BuildLastStop()
     {
         if (lastStopSet != null) return;
+        MoveToCrashLocation();
         lastStopSet = new GameObject("Last stop - inspector configurable");
         // Keep the crash in the actual playable bus. Duplicating the entire City
         // here caused long editor stalls and an empty, disconnected destination.
         lastStopSet.transform.position = existingBus.position;
         Vector3 center = lastStopSet.transform.position;
+        Shape(lastStopSet.transform, "Isolated forest placeholder ground", PrimitiveType.Cube,
+            crashLocation + existingBus.forward * 35 - Vector3.up * .5f,
+            new Vector3(180, 1, 180), new Color(.16f,.19f,.22f));
+        Physics.SyncTransforms();
         BuildForestRoute();
         for (int i = 0; i < forestTreeCount; i++)
         {
             Vector3 along = Vector3.Lerp(routeSign, routeHouse, (i/2f)/Mathf.Max(1,forestTreeCount/2f));
             Vector3 side = Vector3.Cross(Vector3.up,(routeHouse-routeSign).normalized);
             Vector3 position = RouteGround(along + side * (i % 2 == 0 ? -5 : 5));
-            if (forestTreePrefab != null) Instantiate(forestTreePrefab, position, Quaternion.Euler(0, i * 83, 0), lastStopSet.transform);
+            if (forestTreePrefab != null)
+            {
+                var tree = Instantiate(forestTreePrefab, position, Quaternion.Euler(0, i * 83, 0), lastStopSet.transform);
+                PrepareForestMaterials(tree);
+            }
             else Shape(lastStopSet.transform, "Forest tree", PrimitiveType.Cylinder, position + Vector3.up * 2.5f, new Vector3(.7f, 5, .7f), new Color(.07f, .12f, .09f));
+        }
+    }
+
+    void PrepareForestMaterials(GameObject tree)
+    {
+        var shader = Shader.Find("Universal Render Pipeline/Lit");
+        if (shader == null || GraphicsSettings.currentRenderPipeline == null) return;
+        foreach (var renderer in tree.GetComponentsInChildren<Renderer>(true))
+        {
+            var slots = renderer.sharedMaterials;
+            for (int i = 0; i < slots.Length; i++)
+            {
+                var source = slots[i];
+                if (source == null || (source.shader != null && source.shader.isSupported &&
+                    source.shader.name.StartsWith("Universal Render Pipeline/"))) continue;
+                // Imported foliage uses legacy shaders. Convert runtime instances,
+                // keeping their texture/alpha; never rewrite the asset pack.
+                var material = new Material(shader) { name = source.name + " (forest URP)" };
+                material.SetTexture("_BaseMap", source.mainTexture);
+                material.SetColor("_BaseColor", source.HasProperty("_Color") ? source.color : Color.white);
+                material.SetFloat("_Smoothness", 0);
+                material.SetFloat("_AlphaClip", 1); material.EnableKeyword("_ALPHATEST_ON");
+                material.SetFloat("_Cutoff", source.HasProperty("_Cutoff") ? source.GetFloat("_Cutoff") : .4f);
+                material.SetFloat("_Cull", 0); material.renderQueue = 2450;
+                materials.Add(material); slots[i] = material;
+            }
+            renderer.sharedMaterials = slots;
         }
     }
 
     Vector3 DestinationForScene(int index)
     {
+        if (crashLocationReady && index >= 5)
+            return crashLocation + existingBus.forward * (index == 6 ? 30 : index >= 7 ? 60 : 8);
         if (index < shots.Length && shots[index] != null && shots[index].stage != null &&
             !shots[index].stage.IsChildOf(transform))
             return shots[index].stage.position;
@@ -315,6 +402,11 @@ public partial class StoryCutsceneDirector
 
     void CleanupAtmosphere()
     {
+        crashLocationReady = false;
+        Shader.SetGlobalFloat("_StoryNightDarkness",0);
+        foreach(var pair in daylightIntensity) if(pair.Key!=null)
+        { pair.Key.intensity=pair.Value;pair.Key.shadows=daylightShadows[pair.Key]; }
+        daylightIntensity.Clear(); daylightShadows.Clear();
         Shader.SetGlobalFloat("_StoryInteriorDarkness",0);
         interiorBlend=0; rangerDoorOpened=false; rangerDoor=null;
         if (lastStopSet != null) Destroy(lastStopSet);

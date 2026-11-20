@@ -280,8 +280,7 @@ public partial class StoryCutsceneDirector
 
     void LateUpdate()
     {
-        if (musicSource != null) musicSource.volume = Mathf.MoveTowards(musicSource.volume,
-            Time.timeScale <= 0 ? 0 : musicVolume * (IsDialogueLinePlaying ? .35f : 1f), Time.unscaledDeltaTime * .3f);
+        UpdateStoryMusic();
         if (IsPlaying) UpdateNightSounds();
         if (!IsPlaying || Time.timeScale <= 0) return;
         UpdateInteriorAtmosphere();
@@ -548,10 +547,10 @@ public partial class StoryCutsceneDirector
             if (delta.sqrMagnitude > .000001f && delta.sqrMagnitude < .25f) spriteHeadings[actor] = delta.normalized;
             bool seated = seatedSpriteActors.Contains(actor);
             Vector3 towardCamera = viewer.transform.position-actor.position; towardCamera.y = 0;
-            bool actuallyWalking = Time.deltaTime > 0 && delta.magnitude > .08f * Time.deltaTime && delta.magnitude < .5f;
-            bool gameplay = !cinematicCamera && !seatedDialogueCamera && !IsDialogueLinePlaying &&
-                playerMovement != null && playerMovement.isActiveAndEnabled && Time.timeScale > 0;
-            bool back = gameplay && !seated && actuallyWalking && Vector3.Dot(delta.normalized, towardCamera.normalized) < -.35f;
+            // Use actual horizontal travel in every scene, including scripted walks.
+            // Rotation, camera movement, grounding and a teleport must never expose a back pose.
+            bool back = !seated && Time.timeScale > 0 && ShouldShowWalkingBack(delta, towardCamera,
+                Time.deltaTime, pair.Value[1] != null && visual.sprite == pair.Value[1]);
             visual.sprite = pair.Value[seated ? 2 : back ? 1 : 0] ?? pair.Value[0];
             if (visual.sharedMaterial != null && visual.sharedMaterial.HasProperty("_BackGrade"))
             {
@@ -570,6 +569,15 @@ public partial class StoryCutsceneDirector
             // Seated portraits look toward the viewer; mirror the profile on the other side of the aisle.
             visual.flipX = seated && existingBus != null && Vector3.Dot(towardCamera, existingBus.forward) < 0;
         }
+    }
+
+    static bool ShouldShowWalkingBack(Vector3 travel, Vector3 towardViewer, float seconds, bool wasBack)
+    {
+        travel.y = 0; towardViewer.y = 0;
+        if (seconds <= 0 || travel.magnitude <= .08f * seconds ||
+            travel.magnitude > 12f * seconds || towardViewer.sqrMagnitude < .01f) return false;
+        // Narrow entry cone; a little hysteresis prevents flicker around its edge.
+        return Vector3.Dot(travel.normalized, towardViewer.normalized) < (wasBack ? -.45f : -.65f);
     }
     Renderer originalPlayerVisual;
     bool originalPlayerVisualEnabled;
@@ -737,7 +745,7 @@ public partial class StoryCutsceneDirector
                     if (placement != null && ActorRole(placement.actorName) == names[i])
                     {
                         Transform stage = scene == 0 && schoolExit != null ? schoolExit : shot.stage != null ? shot.stage : existingBus;
-                        position = scene >= 1 && stage.IsChildOf(transform)
+                        position = scene >= 1 && (stage.IsChildOf(transform) || (crashLocationReady && scene >= 5))
                             ? anchor + stage.TransformDirection(placement.localPosition)
                             : stage.TransformPoint(placement.localPosition);
                         rotation = stage.rotation * Quaternion.Euler(placement.localEulerAngles);
@@ -828,15 +836,8 @@ public partial class StoryCutsceneDirector
 
     IEnumerator WalkSchoolRow()
     {
-        // Imported school meshes may have no collision, so the terrain below
-        // was being selected even when a visible porch was above it.
-        if (schoolExit.parent != null)
-            foreach (var mesh in schoolExit.parent.GetComponentsInChildren<MeshFilter>())
-                if (mesh.sharedMesh != null && mesh.GetComponent<Collider>() == null)
-                {
-                    var surface = mesh.gameObject.AddComponent<MeshCollider>();
-                    surface.sharedMesh = mesh.sharedMesh;
-                }
+        // School collision is authored on its LOD0 prefab, before static
+        // batching. Runtime MeshFilters can contain combined world-space meshes.
         Physics.SyncTransforms();
         string[] names = { "Ethan", "Lucas", "Noah" };
         Transform[] boys = new Transform[names.Length];
@@ -1051,6 +1052,7 @@ public partial class StoryCutsceneDirector
             arrivedAtLastStop = true;
             existingDriver.gameObject.SetActive(false);
             BuildLastStop(); ApplyAtmosphere(true);
+            BeginCrashMusic();
             PlayAmbience(horrorAmbience);
             glassesCollected = resumeState.glassesCollected;
             driverSeatFound = resumeState.driverSeatFound;
@@ -1069,7 +1071,11 @@ public partial class StoryCutsceneDirector
                 }
             }
             Vector3 savedFeet = resumeState.hasPlayerPosition
-                ? resumeState.playerPosition - Vector3.up * PlayerFeetOffset : aisleFeet;
+                ? resumeState.playerPosition - Vector3.up * PlayerFeetOffset
+                : checkpoint == "exploring" ? RouteGround(doorOutside) : aisleFeet;
+            // Migrate old city checkpoints; new saves already use the remote location.
+            if (resumeState.hasPlayerPosition && Vector3.Distance(savedFeet, crashLocation) > 300)
+                savedFeet += crashLocationDelta;
             TeleportPlayer(savedFeet, resumeState.playerRotation * Vector3.forward);
             if (checkpoint == "lastStop") KeepFriendsSeatedAfterCrash();
             else
@@ -1270,10 +1276,11 @@ public partial class StoryCutsceneDirector
         if (sleepBeforeFadeSeconds > 0) yield return WaitUnpaused(sleepBeforeFadeSeconds);
         yield return FadeTo(1, crashFadeOutSeconds);
         yield return WaitUnpaused(sleepToCrashBlackHoldSeconds);
+        BeginCrashMusic();
         StopEngine(); PlayEffect(crashSound, 4);
         PlayAmbience(horrorAmbience);
-        // Never teleport the bus after impact: player, seats and pickup remain in
-        // the same playable interior, rather than an unloaded patch of terrain.
+        // Relocate the complete playable interior during blackness, preserving
+        // seat/player/pickup offsets while leaving the city behind.
         arrivedAtLastStop = true;
         OpeningCheckpoint = "lastStop";
         existingDriver.gameObject.SetActive(false);
@@ -1457,6 +1464,9 @@ public partial class StoryCutsceneDirector
             if (visual != null) actor.position += Vector3.up * (feet - visual.bounds.min.y);
         }
         Vector3 playerFeet = existingPlayer.position - Vector3.up * PlayerFeetOffset;
+        if ((playerFeet-navigationPlayerLast).sqrMagnitude < .0001f) playerIdleSeconds += Time.deltaTime;
+        else playerIdleSeconds = 0;
+        navigationPlayerLast = playerFeet;
         if (!companionFollowReady)
         {
             lastPlayerFollowFeet = playerFeet;
@@ -1465,7 +1475,7 @@ public partial class StoryCutsceneDirector
         }
         Vector3 travel = playerFeet - lastPlayerFollowFeet;
         travel.y = 0;
-        if (!companionsFollowing && travel.magnitude < friendFollowStartDistance)
+        if (!companionsFollowing && travel.magnitude < friendFollowStartDistance && playerIdleSeconds < 3)
             return;
         companionsFollowing = true;
         if (travel.sqrMagnitude > .0025f)
@@ -1500,11 +1510,12 @@ public partial class StoryCutsceneDirector
             var renderer = friend.GetComponentInChildren<Renderer>();
             target.y = floorY + actorGroundClearance +
                 (renderer != null ? friend.position.y - renderer.bounds.min.y : 0);
+            if (!insideBus) target = CompanionWaypoint(friend, target, playerIdleSeconds > 3);
             if ((friend.position - target).sqrMagnitude > friendFollowStopDistance * friendFollowStopDistance)
             {
                 friendFollowVelocity.TryGetValue(name, out Vector3 velocity);
                 Vector3 next = Vector3.SmoothDamp(friend.position, target, ref velocity,
-                    .3f, playerMovement.CurrentMoveSpeed, Time.deltaTime);
+                    .3f, playerIdleSeconds > 3 ? 1f : playerMovement.CurrentMoveSpeed, Time.deltaTime);
                 Vector3 fromPlayer = next - playerFeet;
                 fromPlayer.y = 0;
                 if (fromPlayer.magnitude < 1.15f) next = friend.position;
@@ -1562,6 +1573,7 @@ public partial class StoryCutsceneDirector
 
     void CleanupFirstPerson()
     {
+        companionRoutes.Clear(); playerIdleSeconds = 0;
         bobPreviousPosition.Clear(); bobPhase.Clear(); bobOffset.Clear();
         directionalSprites.Clear(); spriteLastPositions.Clear(); spriteHeadings.Clear(); seatedSpriteActors.Clear();
         if (originalPlayerVisual != null) originalPlayerVisual.enabled = originalPlayerVisualEnabled;

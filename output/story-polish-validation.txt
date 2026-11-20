@@ -1,0 +1,1 @@
+PASS: directional sprites (away/toward/sideways/stationary/vertical/teleport); 12 school porch rays; obstacle detour; distant follower path; isolated crash relocation; preserved player and glasses offsets; idempotent relocation; 1m glasses range; authored pickup prompt; near/far/hidden/visible/occluded pickup gating.

@@ -23,6 +23,11 @@ public class PickUp : MonoBehaviour
     PlayerAnimations animations;
     bool playerInRange;
     bool collected;
+    public bool CanOfferPickup { get; private set; }
+    PromptFade prompt;
+    public float EffectivePickupRange => itemTag == "BrokenGlasses" ? Mathf.Min(pickupRange * .5f, 1f) : pickupRange;
+    void Awake() { prompt = GetComponentInChildren<PromptFade>(true); }
+    void OnDisable() { CanOfferPickup = false; }
 
     public void SetPlayerInRange(bool value, GameObject playerObj)
     {
@@ -40,6 +45,7 @@ public class PickUp : MonoBehaviour
 
     void Update()
     {
+        CanOfferPickup = false;
         if (collected) return;
         if (player == null) player = GameObject.FindWithTag("Player");
         if (inventory == null && player != null) inventory = player.GetComponentInParent<InventorySystem>();
@@ -53,7 +59,7 @@ public class PickUp : MonoBehaviour
         Renderer artwork = GetComponentInChildren<SpriteRenderer>();
         if (artwork == null) artwork = GetComponentInChildren<MeshRenderer>();
         Vector3 target = artwork != null ? artwork.bounds.ClosestPoint(origin) : transform.position;
-        float reach = itemTag == "BrokenGlasses" ? Mathf.Min(pickupRange, 2f) : pickupRange;
+        float reach = EffectivePickupRange;
         bool inRange = player != null && (origin - target).sqrMagnitude <= reach * reach;
         playerInRange = inRange;
         bool visible = view != null && view.isActiveAndEnabled && artwork != null && artwork.enabled;
@@ -71,7 +77,13 @@ public class PickUp : MonoBehaviour
                 break;
             }
         }
-        if (inRange && visible && Input.GetKeyDown(KeyCode.E)) PickUpItem();
+        CanOfferPickup = inRange && visible;
+    }
+
+    void LateUpdate()
+    {
+        var view = player != null ? player.GetComponentInChildren<Camera>() : null;
+        if (CanOfferPickup && prompt != null && prompt.IsReadable(view) && Input.GetKeyDown(KeyCode.E)) PickUpItem();
     }
 
     void PickUpItem()
@@ -89,6 +101,6 @@ public class PickUp : MonoBehaviour
 
     void OnDrawGizmosSelected()
     {
-        Gizmos.color = Color.cyan; Gizmos.DrawWireSphere(transform.position, pickupRange);
+        Gizmos.color = Color.cyan; Gizmos.DrawWireSphere(transform.position, EffectivePickupRange);
     }
 }

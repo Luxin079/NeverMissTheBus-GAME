@@ -49,6 +49,8 @@ public class StartScreenUI : MonoBehaviour
         menuCamera.clearFlags = CameraClearFlags.SolidColor;
         menuCamera.backgroundColor = Color.black;
         menuCamera.cullingMask = 0;
+        if (FindFirstObjectByType<AudioListener>() == null)
+            menuCamera.gameObject.AddComponent<AudioListener>();
         EnsureEventSystem();
         BuildMenu();
         menuMusicSource = gameObject.AddComponent<AudioSource>();

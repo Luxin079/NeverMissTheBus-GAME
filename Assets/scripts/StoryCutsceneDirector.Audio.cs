@@ -19,6 +19,34 @@ public partial class StoryCutsceneDirector
     public AudioClip gameplayMusic;
     [Range(0, 1)] public float musicVolume = .12f;
     AudioSource musicSource;
+    [Min(0)] public float crashMusicSilenceSeconds = 7f;
+    [Min(1)] public float horrorMusicBuildSeconds = 45f;
+    public AudioClip postCrashMusic;
+    AudioClip horrorScore;
+    float crashMusicElapsed = -1;
+
+    void BeginCrashMusic()
+    {
+        crashMusicElapsed = 0;
+        if (musicSource != null) { musicSource.Stop(); musicSource.volume = 0; }
+        if (nightSource != null) nightSource.Stop();
+    }
+
+    void UpdateStoryMusic()
+    {
+        if (musicSource == null) return;
+        if (Time.timeScale <= 0) { musicSource.Pause(); return; }
+        float target = musicVolume * (IsDialogueLinePlaying ? .45f : 1);
+        if (crashMusicElapsed >= 0)
+        {
+            crashMusicElapsed += Time.deltaTime;
+            if (crashMusicElapsed < crashMusicSilenceSeconds) return;
+            target *= Mathf.SmoothStep(0, 1, (crashMusicElapsed-crashMusicSilenceSeconds)/horrorMusicBuildSeconds);
+            if (musicSource.clip != horrorScore) { musicSource.clip = horrorScore; musicSource.Play(); }
+        }
+        musicSource.UnPause();
+        musicSource.volume = Mathf.MoveTowards(musicSource.volume, target, Time.deltaTime*.06f);
+    }
     [Range(0, 1)] public float ambientVolume = .35f;
     [Range(0, 1)] public float engineVolume = .45f;
     [Range(0, 1)] public float effectsVolume = .6f;
@@ -94,6 +122,9 @@ public partial class StoryCutsceneDirector
         var score = gameplayMusic;
         if (score == null) { score = OriginalAmbientScore.Create(false); generatedSounds.Add(score); }
         musicSource.clip = score; musicSource.volume = musicVolume; musicSource.Play();
+        crashMusicElapsed = -1;
+        horrorScore = postCrashMusic;
+        if (horrorScore == null) { horrorScore = OriginalAmbientScore.CreateHorror(); generatedSounds.Add(horrorScore); }
         ambienceSource = gameObject.AddComponent<AudioSource>();
         ambienceSource.loop = true; ambienceSource.spatialBlend = 0; ambienceSource.volume = ambientVolume;
         engineSource = existingBus.gameObject.AddComponent<AudioSource>();
@@ -172,6 +203,24 @@ public partial class StoryCutsceneDirector
 // Original sparse music-box/pad composition, not a transcription of an existing soundtrack.
 public static class OriginalAmbientScore
 {
+    public static AudioClip CreateHorror()
+    {
+        const int rate=22050, seconds=48;
+        var samples=new float[rate*seconds];
+        for(int i=0;i<samples.Length;i++)
+        {
+            double t=(double)i/rate;
+            double fade=System.Math.Min(1,System.Math.Min(t/4,(seconds-t)/4));
+            double breath=.55+.25*System.Math.Sin(t*.37);
+            double low=System.Math.Sin(2*System.Math.PI*55*t)*.10+
+                System.Math.Sin(2*System.Math.PI*55.6*t)*.065;
+            double age=t%8;
+            double bell=System.Math.Sin(2*System.Math.PI*(t<24?207.65:196)*age)*System.Math.Exp(-age*1.2)*.07;
+            samples[i]=(float)((low*breath+bell)*fade);
+        }
+        var clip=AudioClip.Create("After impact - original slow dread",samples.Length,1,rate,false);
+        clip.SetData(samples,0);return clip;
+    }
     public static AudioClip Create(bool menu)
     {
         const int rate = 22050, seconds = 32;
