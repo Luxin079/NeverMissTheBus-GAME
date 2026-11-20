@@ -280,6 +280,7 @@ public partial class StoryCutsceneDirector
 
     void LateUpdate()
     {
+        UpdateStoryUIVisibility();
         if (musicSource != null) musicSource.volume = Mathf.MoveTowards(musicSource.volume,
             Time.timeScale <= 0 ? 0 : musicVolume * (IsDialogueLinePlaying ? .35f : 1f), Time.unscaledDeltaTime * .3f);
         if (IsPlaying) UpdateNightSounds();
@@ -986,7 +987,8 @@ public partial class StoryCutsceneDirector
 
     IEnumerator WaitForAisleMidpoint()
     {
-        SetObjective("Loop naar je vrienden achterin de bus.");
+        SetObjective("Head to the back of the bus and join your friends.");
+        SetPlayerControl(true);
         // Use the authored bus body, not the generated floor's guessed height/width.
         // The latter can reject a player visibly standing inside an imported bus.
         MeshRenderer busBody = null;
@@ -1098,7 +1100,6 @@ public partial class StoryCutsceneDirector
                 TeleportPlayer(resumeState.hasPlayerPosition ? resumeState.playerPosition - Vector3.up * PlayerFeetOffset : doorOutside,
                     aisleFeet - doorOutside);
                 storyCamera.enabled = false; gameCamera.enabled = true; cinematicCamera = false;
-                SetPlayerControl(true);
                 yield return WaitForAisleMidpoint();
                 yield return RunSeatedSequence(false);
             }
@@ -1198,7 +1199,6 @@ public partial class StoryCutsceneDirector
         SeatFriends(false);
         yield return SpeakScenePart(1, true);
         existingPlayer.gameObject.layer = boardingLayer;
-        SetPlayerControl(true);
         OpeningCheckpoint = "boarding";
         PlayAmbience(busInteriorAmbience);
         yield return WaitForAisleMidpoint();
@@ -1241,7 +1241,7 @@ public partial class StoryCutsceneDirector
         if (seatedShotHoldSeconds > 0) yield return WaitUnpaused(seatedShotHoldSeconds);
         if (!continueAfterSeating)
         {
-            SetObjective("Hoofdstuk voltooid. Open het menu met Escape.");
+            SetObjective("Chapter complete. Open the menu with Escape.");
             yield break;
         }
         PlayEngine(true);
@@ -1306,7 +1306,7 @@ public partial class StoryCutsceneDirector
             // Require a fresh press: a held sprint key must not skip this beat.
             holdSeatedView = true;
             playerController.enabled = false;
-            SetObjective("Druk op Shift om op te staan.");
+            SetObjective("Press Shift to stand up.");
             yield return null;
             while (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift))
                 yield return null;
@@ -1316,7 +1316,7 @@ public partial class StoryCutsceneDirector
             SetObjective("");
             while (!TryStandInBusAisle())
             {
-                SetObjective("Geen vrije staplek: plaats Post Crash Stand Point in het gangpad.");
+                SetObjective("No clear standing space. Assign the Post Crash Stand Point in the aisle.");
                 yield return null;
             }
         }
@@ -1328,7 +1328,7 @@ public partial class StoryCutsceneDirector
         SetPlayerControl(true);
         if (!driverSeatFound)
         {
-            SetObjective("Kijk voorin de bus naar de chauffeursstoel.");
+            SetObjective("Go to the front of the bus and inspect the driver's seat.");
             yield return WaitForDriverSeat();
             SetPlayerControl(false);
             SetObjective("");
@@ -1365,7 +1365,7 @@ public partial class StoryCutsceneDirector
             if (glassesPickup == null)
             {
                 Debug.LogError("BrokenGlasses is missing or has no PickUp component. The player cannot leave the bus until this scene pickup is assigned.", this);
-                SetObjective("BrokenGlasses ontbreekt: koppel het volledige scène-object in de Inspector.");
+                SetObjective("BrokenGlasses is missing. Assign the complete scene object in the Inspector.");
                 while (glassesPickup == null)
                 {
                     ResolveSceneGlasses();
@@ -1375,22 +1375,22 @@ public partial class StoryCutsceneDirector
                 }
             }
             glassesPickup.enabled = true;
-            SetObjective("Pak de bril van de chauffeur op met E.");
+            SetObjective("Pick up the driver's glasses with E.");
             while (!glassesCollected) yield return null;
         }
-        SetObjective("Stap uit de bus.");
+        SetObjective("Get off the bus.");
         Vector3 exit = doorOutside;
         while (Vector3.Distance(existingPlayer.position, exit + Vector3.up * PlayerFeetOffset) > 1.7f)
         {
             // Friends remain seated until the exterior transition places the group outside.
             yield return null;
         }
+        SetPlayerControl(false);
+        SetObjective("");
         yield return FadeTo(1);
         TeleportPlayer(exit, existingBus.forward);
         PlaceFriends(5, existingPlayer.position + existingBus.forward * 2);
         yield return FadeTo(0);
-        SetPlayerControl(false);
-        SetObjective("");
         OpeningCheckpoint = "exploring";
         yield return ExploreLaterScenes(5, false);
     }
@@ -1409,7 +1409,7 @@ public partial class StoryCutsceneDirector
                 yield return SpeakScene(scene);
                 seatedDialogueCamera=false;
             }
-            SetPlayerControl(true); SetObjective("Verken het huis van de boswachter.");
+            SetPlayerControl(true); SetObjective("Explore the forest ranger's house.");
             while(IsPlaying) { FollowFriendsNearPlayer(); yield return null; }
             yield break;
         }
@@ -1419,7 +1419,7 @@ public partial class StoryCutsceneDirector
             {
                 Vector3 destination = DestinationForScene(i);
                 SetPlayerControl(true);
-                SetObjective(i < 9 ? "Volg het pad door het bos." : "Zoek verder naar aanwijzingen.");
+                SetObjective(i < 9 ? "Follow the path through the forest." : "Keep searching for clues.");
                 while (Vector3.Distance(existingPlayer.position, destination) > 3)
                 {
                     FollowFriendsNearPlayer();
